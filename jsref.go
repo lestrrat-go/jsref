@@ -16,7 +16,7 @@ func New() *Resolver {
 }
 
 // AddProvider adds a new Provider to be searched for in case
-// a JSON pointer with more than just the URI fragment is given
+// a JSON pointer with more than just the URI fragment is given.
 func (r *Resolver) AddProvider(p Provider) error {
 	r.providers = append(r.providers, p)
 	return nil
@@ -82,7 +82,7 @@ func (r *Resolver) Resolve(v interface{}, spec string) (ret interface{}, err err
 		}
 	default:
 		if pdebug.Enabled {
-			pdebug.Printf("rv is %s", rv.Kind())
+			pdebug.Printf("rv is %s (%s)", x, rv.Kind())
 		}
 	}
 
