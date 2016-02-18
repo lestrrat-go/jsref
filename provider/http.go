@@ -2,9 +2,13 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+
+	"github.com/lestrrat/go-pdebug"
 )
 
 func NewHTTP() *HTTP {
@@ -17,6 +21,17 @@ func NewHTTP() *HTTP {
 }
 
 func (hp *HTTP) Get(key *url.URL) (interface{}, error) {
+	if pdebug.Enabled {
+		g := pdebug.IPrintf("START HTTP.Get(%s)", key)
+		defer g.IRelease("END HTTP.Get(%s)", key)
+	}
+
+	switch strings.ToLower(key.Scheme) {
+	case "http", "https":
+	default:
+		return nil, errors.New("key is not http/https URL")
+	}
+
 	v, err := hp.mp.Get(key)
 	if err == nil { // Found!
 		return v, nil

@@ -32,10 +32,16 @@ func (r *Resolver) AddProvider(p Provider) error {
 //
 // If `spec` is the empty string, `v` is returned
 // This method handles recursive JSON references.
-func (r *Resolver) Resolve(v interface{}, spec string) (interface{}, error) {
+func (r *Resolver) Resolve(v interface{}, spec string) (ret interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.IPrintf("START Resolver.Resolve(%s)", spec)
-		defer g.IRelease("END Resolver.Resolve(%s)", spec)
+		defer func() {
+			if err != nil {
+				g.IRelease("END Resolver.Resolve(%s): %s", spec, err)
+			} else {
+				g.IRelease("END Resolver.Resolve(%s)", spec)
+			}
+		}()
 	}
 
 	if spec == "" {
@@ -54,23 +60,9 @@ func (r *Resolver) Resolve(v interface{}, spec string) (interface{}, error) {
 		}
 	}
 
-	var x interface{}
-	ptr := u.Fragment
-	if ptr == "" {
-		x = v
-	} else {
-		if pdebug.Enabled {
-			pdebug.Printf("Using JSON Pointer '%s'", ptr)
-		}
-		p, err := jspointer.New(ptr)
-		if err != nil {
-			return nil, err
-		}
-
-		x, err = p.Get(v)
-		if err != nil {
-			return nil, err
-		}
+	x, err := matchjsp(v, u.Fragment)
+	if err != nil {
+		return nil, err
 	}
 
 	rv := reflect.ValueOf(x)
@@ -81,32 +73,44 @@ func (r *Resolver) Resolve(v interface{}, spec string) (interface{}, error) {
 	switch rv.Kind() {
 	case reflect.Map:
 		refv := rv.MapIndex(reflect.ValueOf("$ref"))
-		if refv.Kind() == reflect.Interface {
-			refv = refv.Elem()
-		}
-		switch refv.Kind() {
-		case reflect.Invalid:
-			// no op
-		case reflect.String:
-			return r.Resolve(v, refv.String())
-		default:
-			return nil, errors.New("'$ref' must be a string (got " + refv.Kind().String() + ")")
-		}
+		return recurse(r, v, refv)
 	case reflect.Struct:
 		i := structinfo.StructFieldFromJSONName(rv, "$ref")
 		refv := rv.Field(i)
-		if refv.Kind() == reflect.Interface {
-			refv = refv.Elem()
-		}
-		switch refv.Kind() {
-		case reflect.Invalid:
-			// no op
-		case reflect.String:
-			return r.Resolve(v, refv.String())
-		default:
-			return nil, errors.New("'$ref' must be a string (got " + refv.Kind().String() + ")")
-		}
+		return recurse(r, v, refv)
 	}
 
 	return x, nil
+}
+
+func matchjsp(v interface{}, ptr string) (interface{}, error) {
+	if pdebug.Enabled {
+		g := pdebug.IPrintf("START matchjsp(%s)", ptr)
+		defer g.IRelease("END matchjsp(%s)", ptr)
+	}
+	if ptr == "" {
+		return v, nil
+	}
+
+	p, err := jspointer.New(ptr)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.Get(v)
+}
+
+func recurse(r *Resolver, x interface{}, refv reflect.Value) (interface{}, error) {
+	if refv.Kind() == reflect.Interface {
+		refv = refv.Elem()
+	}
+
+	switch refv.Kind() {
+	case reflect.Invalid:
+		return x, nil
+	case reflect.String:
+		return r.Resolve(x, refv.String())
+	default:
+		return nil, errors.New("'$ref' must be a string (got " + refv.Kind().String() + ")")
+	}
 }
