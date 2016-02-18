@@ -66,7 +66,8 @@ func (r *Resolver) Resolve(v interface{}, spec string) (ret interface{}, err err
 	}
 
 	rv := reflect.ValueOf(x)
-	if rv.Kind() == reflect.Interface {
+	switch rv.Kind() {
+	case reflect.Interface, reflect.Ptr:
 		rv = rv.Elem()
 	}
 
@@ -75,18 +76,29 @@ func (r *Resolver) Resolve(v interface{}, spec string) (ret interface{}, err err
 		refv := rv.MapIndex(reflect.ValueOf("$ref"))
 		return recurse(r, v, refv)
 	case reflect.Struct:
-		i := structinfo.StructFieldFromJSONName(rv, "$ref")
-		refv := rv.Field(i)
-		return recurse(r, v, refv)
+		if i := structinfo.StructFieldFromJSONName(rv, "$ref"); i > -1 {
+			refv := rv.Field(i)
+			return recurse(r, v, refv)
+		}
+	default:
+		if pdebug.Enabled {
+			pdebug.Printf("rv is %s", rv.Kind())
+		}
 	}
 
 	return x, nil
 }
 
-func matchjsp(v interface{}, ptr string) (interface{}, error) {
+func matchjsp(v interface{}, ptr string) (res interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.IPrintf("START matchjsp(%s)", ptr)
-		defer g.IRelease("END matchjsp(%s)", ptr)
+		defer func() {
+			if err != nil {
+				g.IRelease("END matchjsp(%s): %s", ptr, err)
+			} else {
+				g.IRelease("END matchjsp(%s)", ptr)
+			}
+		}()
 	}
 	if ptr == "" {
 		return v, nil
