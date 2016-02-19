@@ -10,9 +10,11 @@ import (
 	"github.com/lestrrat/go-structinfo"
 )
 
+var DefaultMaxRecursions = 10
+
 // New creates a new Resolver
 func New() *Resolver {
-	return &Resolver{}
+	return &Resolver{MaxRecursions: DefaultMaxRecursions}
 }
 
 // AddProvider adds a new Provider to be searched for in case
@@ -20,6 +22,12 @@ func New() *Resolver {
 func (r *Resolver) AddProvider(p Provider) error {
 	r.providers = append(r.providers, p)
 	return nil
+}
+
+type resolveCtx struct {
+	rlevel    int         // recurse level
+	maxrlevel int         // max recurse level
+	object    interface{} // the main object that was passed to `Resolve()`
 }
 
 // Resolve takes a target `v`, and a JSON pointer `spec`.
@@ -32,97 +40,197 @@ func (r *Resolver) AddProvider(p Provider) error {
 //
 // If `spec` is the empty string, `v` is returned
 // This method handles recursive JSON references.
-func (r *Resolver) Resolve(v interface{}, spec string) (ret interface{}, err error) {
+func (r *Resolver) Resolve(v interface{}, ptr string) (ret interface{}, err error) {
 	if pdebug.Enabled {
-		g := pdebug.IPrintf("START Resolver.Resolve(%s)", spec)
+		g := pdebug.IPrintf("START Resolver.Resolve(%s)", ptr)
 		defer func() {
 			if err != nil {
-				g.IRelease("END Resolver.Resolve(%s): %s", spec, err)
+				g.IRelease("END Resolver.Resolve(%s): %s", ptr, err)
 			} else {
-				g.IRelease("END Resolver.Resolve(%s)", spec)
+				g.IRelease("END Resolver.Resolve(%s)", ptr)
 			}
 		}()
 	}
 
-	if spec == "" {
-		return v, nil
+	ctx := resolveCtx{
+		rlevel:    0,
+		maxrlevel: r.MaxRecursions,
+		object:    v,
 	}
 
-	u, err := url.Parse(spec)
+	// First, expand the target as much as we can
+	v, err = expandRefRecursive(ctx, r, v)
 	if err != nil {
 		return nil, err
 	}
 
+	return evalptr(ctx, r, v, ptr)
+}
+
+func expandRefRecursive(ctx resolveCtx, r *Resolver, v interface{}) (ret interface{}, err error) {
+	if pdebug.Enabled {
+		g := pdebug.IPrintf("START expandRefRecursive")
+		defer g.IRelease("END expandRefRecursive")
+	}
+	for {
+		ref, err := findRef(v)
+		if err != nil {
+			if pdebug.Enabled {
+				pdebug.Printf("No refs found. bailing out of loop")
+			}
+			break
+		}
+
+		if pdebug.Enabled {
+			pdebug.Printf("Found ref '%s'", ref)
+		}
+
+		newv, err := expandRef(ctx, r, v, ref)
+		if err != nil {
+			if pdebug.Enabled {
+				pdebug.Printf("Failed to expand ref '%s': %s", ref, err)
+			}
+			return nil, err
+		}
+		if pdebug.Enabled {
+			pdebug.Printf("Expanded ref")
+		}
+
+		v = newv
+	}
+
+	return v, nil
+}
+
+func expandRef(ctx resolveCtx, r *Resolver, v interface{}, ref string) (ret interface{}, err error) {
+	ctx.rlevel++
+	if ctx.rlevel > ctx.maxrlevel {
+		return nil, ErrMaxRecursion
+	}
+
+	defer func() { ctx.rlevel-- }()
+
+	u, err := url.Parse(ref)
+	if err != nil {
+		return nil, err
+	}
+
+	ptr := "#" + u.Fragment
+	if u.Host == "" && u.Path == "" {
+		if pdebug.Enabled {
+			pdebug.Printf("ptr doesn't contain any host/path part, apply json pointer directly to object")
+		}
+		return evalptr(ctx, r, ctx.object, ptr)
+	}
+
+	u.Fragment = ""
 	for _, p := range r.providers {
 		pv, err := p.Get(u)
 		if err == nil {
-			return r.Resolve(pv, "#"+u.Fragment)
+			if pdebug.Enabled {
+				pdebug.Printf("Found object matching %s", u)
+			}
+
+			return evalptr(ctx, r, pv, ptr)
 		}
 	}
 
-	x, err := matchjsp(v, u.Fragment)
-	if err != nil {
-		return nil, err
+	return nil, errors.New("element pointed by $ref '" + ref + "' not found")
+}
+
+func findRef(v interface{}) (ref string, err error) {
+	if pdebug.Enabled {
+		g := pdebug.IPrintf("START findRef")
+		defer func() {
+			if err != nil {
+				g.IRelease("END findRef: ref not found: %s", err)
+			} else {
+				g.IRelease("END findRef: found '%s'", ref)
+			}
+		}()
 	}
 
-	rv := reflect.ValueOf(x)
+	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
 	case reflect.Interface, reflect.Ptr:
 		rv = rv.Elem()
 	}
 
+	if pdebug.Enabled {
+		pdebug.Printf("object is a '%s'", rv.Kind())
+	}
+
+	// Find if we have a "$ref" element
+	refv := zeroval
 	switch rv.Kind() {
 	case reflect.Map:
-		refv := rv.MapIndex(reflect.ValueOf("$ref"))
-		return recurse(r, v, refv)
+		refv = rv.MapIndex(reflect.ValueOf("$ref"))
 	case reflect.Struct:
 		if i := structinfo.StructFieldFromJSONName(rv, "$ref"); i > -1 {
-			refv := rv.Field(i)
-			return recurse(r, v, refv)
+			refv = rv.Field(i)
 		}
 	default:
-		if pdebug.Enabled {
-			pdebug.Printf("rv is %s (%s)", x, rv.Kind())
-		}
+		return "", errors.New("element is not a map-like container")
 	}
 
-	return x, nil
-}
-
-func matchjsp(v interface{}, ptr string) (res interface{}, err error) {
-	if pdebug.Enabled {
-		g := pdebug.IPrintf("START matchjsp(%s)", ptr)
-		defer func() {
-			if err != nil {
-				g.IRelease("END matchjsp(%s): %s", ptr, err)
-			} else {
-				g.IRelease("END matchjsp(%s)", ptr)
-			}
-		}()
-	}
-	if ptr == "" {
-		return v, nil
-	}
-
-	p, err := jspointer.New(ptr)
-	if err != nil {
-		return nil, err
-	}
-
-	return p.Get(v)
-}
-
-func recurse(r *Resolver, x interface{}, refv reflect.Value) (interface{}, error) {
-	if refv.Kind() == reflect.Interface {
+	switch refv.Kind() {
+	case reflect.Interface, reflect.Ptr:
 		refv = refv.Elem()
 	}
 
 	switch refv.Kind() {
-	case reflect.Invalid:
-		return x, nil
 	case reflect.String:
-		return r.Resolve(x, refv.String())
+		return refv.String(), nil
+	case reflect.Invalid:
+		return "", errors.New("$ref element not found")
 	default:
-		return nil, errors.New("'$ref' must be a string (got " + refv.Kind().String() + ")")
+		if pdebug.Enabled {
+			pdebug.Printf("'$ref' was found, but its kind is %s", refv.Kind())
+		}
 	}
+
+	return "", errors.New("$ref element must be a string")
+}
+
+func evalptr(ctx resolveCtx, r *Resolver, v interface{}, ptrspec string) (ret interface{}, err error) {
+	if pdebug.Enabled {
+		g := pdebug.IPrintf("START evalptr(%s)", ptrspec)
+		defer func() {
+			if err != nil {
+				g.IRelease("END evalptr(%s): %s", ptrspec, err)
+			} else {
+				g.IRelease("END evalptr(%s)", ptrspec)
+			}
+		}()
+	}
+
+	// If the reference is empty, return v
+	if ptrspec == "" || ptrspec == "#" {
+		if pdebug.Enabled {
+			pdebug.Printf("Empty pointer, return v itself")
+		}
+		return v, nil
+	}
+
+	// Parse the spec.
+	u, err := url.Parse(ptrspec)
+	if err != nil {
+		return nil, err
+	}
+
+	ptr := u.Fragment
+	p, err := jspointer.New(ptr)
+	if err != nil {
+		return nil, err
+	}
+	x, err := p.Get(v)
+	if err != nil {
+		return nil, err
+	}
+
+	if pdebug.Enabled {
+		pdebug.Printf("Evaulated JSON pointer, now checking if we can expand further")
+	}
+	// If this result contains more refs, expand that
+	return expandRefRecursive(ctx, r, x)
 }

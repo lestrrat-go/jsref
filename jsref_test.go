@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -63,12 +64,20 @@ func TestResolve(t *testing.T) {
 	mp := provider.NewMap()
 	mp.Set("obj2", map[string]string{"sub": "quux"})
 	res.AddProvider(mp)
-	for ptr, expected := range data {
+
+	ptrlist := make([]string, 0, len(data))
+	for ptr := range data {
+		ptrlist = append(ptrlist, ptr)
+	}
+	sort.Strings(ptrlist)
+
+	for _, ptr := range ptrlist {
+		expected := data[ptr]
 		v, err := res.Resolve(m, ptr)
 		if !assert.NoError(t, err, "Resolve(%s) should succeed", ptr) {
 			return
 		}
-		if !assert.Equal(t, v, expected, "Resolve(%s) resolves to '%s'", expected) {
+		if !assert.Equal(t, v, expected, "Resolve(%s) resolves to '%s'", ptr, expected) {
 			return
 		}
 	}

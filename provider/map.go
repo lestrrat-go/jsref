@@ -21,26 +21,22 @@ func (mp *Map) Set(key string, v interface{}) error {
 	return nil
 }
 
-func (mp *Map) Get(key *url.URL) (interface{}, error) {
+func (mp *Map) Get(key *url.URL) (res interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.IPrintf("START Map.Get(%s)", key)
-		defer g.IRelease("END Map.Get(%s)", key)
+		defer func() {
+			if err != nil {
+				g.IRelease("END Map.Get(%s): %s", key, err)
+			} else {
+				g.IRelease("END Map.Get(%s)", key)
+			}
+		}()
 	}
 
 	mp.lock.Lock()
 	defer mp.lock.Unlock()
 
-	cpy := url.URL{}
-	// Copy everything except for the Fragment
-	cpy.Scheme = key.Scheme
-	cpy.Opaque = key.Opaque
-	cpy.User = key.User
-	cpy.Host = key.Host
-	cpy.Path = key.Path
-	cpy.RawPath = key.RawPath
-	cpy.RawQuery = key.RawQuery
-
-	v, ok := mp.mapping[cpy.String()]
+	v, ok := mp.mapping[key.String()]
 	if !ok {
 		return nil, errors.New("not found")
 	}
