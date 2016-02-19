@@ -180,7 +180,12 @@ func findRef(v interface{}) (ref string, err error) {
 
 	switch refv.Kind() {
 	case reflect.String:
-		return refv.String(), nil
+		// Empty string isn't a valid pointer
+		ref := refv.String()
+		if ref == "" {
+			return "", errors.New("$ref element not found (empty)")
+		}
+		return ref, nil
 	case reflect.Invalid:
 		return "", errors.New("$ref element not found")
 	default:
