@@ -127,3 +127,26 @@ func TestResolveHTTP(t *testing.T) {
 		t.Errorf("Expected map[string]interface{}")
 	}
 }
+
+func TestResolveRecursive(t *testing.T) {
+	var v interface{}
+	src := []byte(`
+{
+	"foo": {
+		"type": "array",
+		"items": { "$ref": "#" }
+	}
+}`)
+	if err := json.Unmarshal(src, &v); err != nil {
+		log.Printf("%s", err)
+		return
+	}
+
+	res := jsref.New()
+	r, err := res.Resolve(v, "#/foo") // "bar"
+	if !assert.NoError(t, err, "res.Resolve should succeed") {
+		return
+	}
+
+	t.Logf("%#v", r)
+}
