@@ -41,3 +41,11 @@ func Example() {
   res.Resolve(v, "#/foo/2") // "quux" (resolve via `mp`)
 }
 ```
+
+# References
+
+| Name                                                     | Notes                         |
+|:--------------------------------------------------------:|:------------------------------|
+| [go-jsval](https://github.com/lestrrat/go-jsval)         | Validator generator           |
+| [go-jsschema](https://github.com/lestrrat/go-jsschema)   | JSON Schema implementation    |
+| [go-jspointer](https://github.com/lestrrat/go-jspointer) | JSON Pointer implementations  |
