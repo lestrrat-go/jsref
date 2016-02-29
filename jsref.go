@@ -166,8 +166,8 @@ func findRef(v interface{}) (ref string, err error) {
 	case reflect.Map:
 		refv = rv.MapIndex(reflect.ValueOf("$ref"))
 	case reflect.Struct:
-		if i := structinfo.StructFieldFromJSONName(rv, "$ref"); i > -1 {
-			refv = rv.Field(i)
+		if fn := structinfo.StructFieldFromJSONName(rv, "$ref"); fn != "" {
+			refv = rv.FieldByName(fn)
 		}
 	default:
 		return "", errors.New("element is not a map-like container")
