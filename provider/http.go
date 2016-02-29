@@ -22,8 +22,8 @@ func NewHTTP() *HTTP {
 
 func (hp *HTTP) Get(key *url.URL) (interface{}, error) {
 	if pdebug.Enabled {
-		g := pdebug.IPrintf("START HTTP.Get(%s)", key)
-		defer g.IRelease("END HTTP.Get(%s)", key)
+		g := pdebug.Marker("HTTP.Get(%s)", key)
+		defer g.End()
 	}
 
 	switch strings.ToLower(key.Scheme) {

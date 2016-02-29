@@ -42,14 +42,8 @@ type resolveCtx struct {
 // This method handles recursive JSON references.
 func (r *Resolver) Resolve(v interface{}, ptr string) (ret interface{}, err error) {
 	if pdebug.Enabled {
-		g := pdebug.IPrintf("START Resolver.Resolve(%s)", ptr)
-		defer func() {
-			if err != nil {
-				g.IRelease("END Resolver.Resolve(%s): %s", ptr, err)
-			} else {
-				g.IRelease("END Resolver.Resolve(%s)", ptr)
-			}
-		}()
+		g := pdebug.Marker("Resolver.Resolve(%s)", ptr).BindError(&err)
+		defer g.End()
 	}
 
 	ctx := resolveCtx{
@@ -69,8 +63,8 @@ func (r *Resolver) Resolve(v interface{}, ptr string) (ret interface{}, err erro
 
 func expandRefRecursive(ctx resolveCtx, r *Resolver, v interface{}) (ret interface{}, err error) {
 	if pdebug.Enabled {
-		g := pdebug.IPrintf("START expandRefRecursive")
-		defer g.IRelease("END expandRefRecursive")
+		g := pdebug.Marker("expandRefRecursive")
+		defer g.End()
 	}
 	for {
 		ref, err := findRef(v)
@@ -140,14 +134,8 @@ func expandRef(ctx resolveCtx, r *Resolver, v interface{}, ref string) (ret inte
 
 func findRef(v interface{}) (ref string, err error) {
 	if pdebug.Enabled {
-		g := pdebug.IPrintf("START findRef")
-		defer func() {
-			if err != nil {
-				g.IRelease("END findRef: ref not found: %s", err)
-			} else {
-				g.IRelease("END findRef: found '%s'", ref)
-			}
-		}()
+		g := pdebug.Marker("findRef").BindError(&err)
+		defer g.End()
 	}
 
 	rv := reflect.ValueOf(v)
@@ -185,6 +173,9 @@ func findRef(v interface{}) (ref string, err error) {
 		if ref == "" {
 			return "", errors.New("$ref element not found (empty)")
 		}
+		if pdebug.Enabled {
+			pdebug.Printf("Found ref '%s'", ref)
+		}
 		return ref, nil
 	case reflect.Invalid:
 		return "", errors.New("$ref element not found")
@@ -199,14 +190,8 @@ func findRef(v interface{}) (ref string, err error) {
 
 func evalptr(ctx resolveCtx, r *Resolver, v interface{}, ptrspec string) (ret interface{}, err error) {
 	if pdebug.Enabled {
-		g := pdebug.IPrintf("START evalptr(%s)", ptrspec)
-		defer func() {
-			if err != nil {
-				g.IRelease("END evalptr(%s): %s", ptrspec, err)
-			} else {
-				g.IRelease("END evalptr(%s)", ptrspec)
-			}
-		}()
+		g := pdebug.Marker("evalptr(%s)", ptrspec).BindError(&err)
+		defer g.End()
 	}
 
 	// If the reference is empty, return v

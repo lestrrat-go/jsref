@@ -23,14 +23,8 @@ func (mp *Map) Set(key string, v interface{}) error {
 
 func (mp *Map) Get(key *url.URL) (res interface{}, err error) {
 	if pdebug.Enabled {
-		g := pdebug.IPrintf("START Map.Get(%s)", key)
-		defer func() {
-			if err != nil {
-				g.IRelease("END Map.Get(%s): %s", key, err)
-			} else {
-				g.IRelease("END Map.Get(%s)", key)
-			}
-		}()
+		g := pdebug.Marker("Map.Get(%s)", key).BindError(&err)
+		defer g.End()
 	}
 
 	mp.lock.Lock()
