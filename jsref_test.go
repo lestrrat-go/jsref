@@ -200,10 +200,8 @@ func TestResolveRecursive(t *testing.T) {
 	}
 
 	res := jsref.New()
-	r, err := res.Resolve(v, "#/foo") // "bar"
+	_, err := res.Resolve(v, "#/foo") // "bar"
 	if !assert.NoError(t, err, "res.Resolve should succeed") {
 		return
 	}
-
-	t.Logf("%#v", r)
 }

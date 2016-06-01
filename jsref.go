@@ -1,13 +1,13 @@
 package jsref
 
 import (
-	"errors"
 	"net/url"
 	"reflect"
 
 	"github.com/lestrrat/go-jspointer"
 	"github.com/lestrrat/go-pdebug"
 	"github.com/lestrrat/go-structinfo"
+	"github.com/pkg/errors"
 )
 
 var DefaultMaxRecursions = 10
@@ -55,7 +55,7 @@ func (r *Resolver) Resolve(v interface{}, ptr string) (ret interface{}, err erro
 	// First, expand the target as much as we can
 	v, err = expandRefRecursive(ctx, r, v)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "recursive search failed")
 	}
 
 	return evalptr(ctx, r, v, ptr)
@@ -84,10 +84,7 @@ func expandRefRecursive(ctx resolveCtx, r *Resolver, v interface{}) (ret interfa
 			if pdebug.Enabled {
 				pdebug.Printf("Failed to expand ref '%s': %s", ref, err)
 			}
-			return nil, err
-		}
-		if pdebug.Enabled {
-			pdebug.Printf("Expanded ref")
+			return nil, errors.Wrap(err, "failed to expand ref")
 		}
 
 		v = newv
@@ -106,7 +103,7 @@ func expandRef(ctx resolveCtx, r *Resolver, v interface{}, ref string) (ret inte
 
 	u, err := url.Parse(ref)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to parse ref as URL")
 	}
 
 	ptr := "#" + u.Fragment
@@ -205,17 +202,17 @@ func evalptr(ctx resolveCtx, r *Resolver, v interface{}, ptrspec string) (ret in
 	// Parse the spec.
 	u, err := url.Parse(ptrspec)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to parse reference spec")
 	}
 
 	ptr := u.Fragment
 	p, err := jspointer.New(ptr)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed create a new JSON pointer")
 	}
 	x, err := p.Get(v)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to fetch value")
 	}
 
 	if pdebug.Enabled {

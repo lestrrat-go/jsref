@@ -2,13 +2,13 @@ package provider
 
 import (
 	"encoding/json"
-	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/lestrrat/go-pdebug"
+	"github.com/pkg/errors"
 )
 
 // NewFS creates a new Provider that looks for JSON documents
@@ -45,7 +45,7 @@ func (fp *FS) Get(key *url.URL) (out interface{}, err error) {
 
 	fi, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to stat local resource")
 	}
 
 	if fi.IsDir() {
@@ -54,14 +54,14 @@ func (fp *FS) Get(key *url.URL) (out interface{}, err error) {
 
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to open local resource")
 	}
 	defer f.Close()
 
 	var x interface{}
 	dec := json.NewDecoder(f)
 	if err := dec.Decode(&x); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to parse JSON local resource")
 	}
 
 	fp.mp.Set(path, x)

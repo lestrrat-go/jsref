@@ -2,13 +2,13 @@ package provider
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/lestrrat/go-pdebug"
+	"github.com/pkg/errors"
 )
 
 func NewHTTP() *HTTP {
@@ -39,7 +39,7 @@ func (hp *HTTP) Get(key *url.URL) (interface{}, error) {
 
 	res, err := hp.Client.Get(key.String())
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to fetch HTTP resource")
 	}
 	defer res.Body.Close()
 
@@ -47,7 +47,7 @@ func (hp *HTTP) Get(key *url.URL) (interface{}, error) {
 
 	var x interface{}
 	if err := dec.Decode(&x); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to parse JSON from HTTP resource")
 	}
 
 	return x, nil
