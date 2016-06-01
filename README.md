@@ -42,6 +42,19 @@ func Example() {
 }
 ```
 
+# Providers
+
+The Resolver object by default does not know how to resolve *any* reference:
+You must provide it one or more `Provider`s to look for and resolve external references.
+
+Currently available `Provider`s are:
+
+| Name          | Description |
+|:--------------|:------------|
+| provider.FS   | Resolve from local file system. References must start with a `file:///` prefix |
+| provider.Map  | Resolve from in memory map. |
+| provider.HTTP | Resolve by making HTTP requests. References must start with a `http(s?)://` prefix |
+
 # References
 
 | Name                                                     | Notes                            |
