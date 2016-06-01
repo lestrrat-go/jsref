@@ -22,9 +22,9 @@ func NewFS(root string) *FS {
 }
 
 // Get fetches the document specified by the `key` argument.
-// Everything other than .Path is ignored. Note that
-// once a document is read, it WILL be cached for the duration
-// of this object, unless you call `Purge`
+// Everything other than `.Path` is ignored.
+// Note that once a document is read, it WILL be cached for the
+// duration of this object, unless you call `Reset`
 func (fp *FS) Get(key *url.URL) (out interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.Marker("provider.FS.Get(%s)", key.String()).BindError(&err)
@@ -67,4 +67,9 @@ func (fp *FS) Get(key *url.URL) (out interface{}, err error) {
 	fp.mp.Set(path, x)
 
 	return x, nil
+}
+
+// Reset resets the in memory cache of JSON documents
+func (fp *FS) Reset() error {
+	return fp.mp.Reset()
 }

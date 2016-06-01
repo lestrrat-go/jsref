@@ -11,6 +11,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+// NewFS creates a new Provider that looks for JSON documents
+// from the internet over HTTP(s)
 func NewHTTP() *HTTP {
 	return &HTTP{
 		mp: NewMap(),
@@ -20,6 +22,10 @@ func NewHTTP() *HTTP {
 	}
 }
 
+// Get fetches the document specified by the `key` argument, making
+// a HTTP request if necessary.
+// Note that once a document is read, it WILL be cached for the
+// duration of this object, unless you call `Reset`
 func (hp *HTTP) Get(key *url.URL) (interface{}, error) {
 	if pdebug.Enabled {
 		g := pdebug.Marker("HTTP.Get(%s)", key)
@@ -51,4 +57,9 @@ func (hp *HTTP) Get(key *url.URL) (interface{}, error) {
 	}
 
 	return x, nil
+}
+
+// Reset resets the in memory cache of JSON documents
+func (hp *HTTP) Reset() error {
+	return hp.mp.Reset()
 }

@@ -37,3 +37,11 @@ func (mp *Map) Get(key *url.URL) (res interface{}, err error) {
 
 	return v, nil
 }
+
+func (mp *Map) Reset() error {
+	mp.lock.Lock()
+	defer mp.lock.Unlock()
+
+	mp.mapping = make(map[string]interface{})
+	return nil
+}
