@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lestrrat/go-pdebug"
 )
 
 // NewFS creates a new Provider that looks for JSON documents
@@ -14,16 +16,23 @@ import (
 // within `root`
 func NewFS(root string) *FS {
 	return &FS{
-		mp: NewMap(),
+		mp:   NewMap(),
 		Root: root,
 	}
 }
 
 // Get fetches the document specified by the `key` argument.
-// Everything other than .Path is ignored.
-func (fp *FS) Get(key *url.URL) (interface{}, error) {
+// Everything other than .Path is ignored. Note that
+// once a document is read, it WILL be cached for the duration
+// of this object, unless you call `Purge`
+func (fp *FS) Get(key *url.URL) (out interface{}, err error) {
+	if pdebug.Enabled {
+		g := pdebug.Marker("provider.FS.Get(%s)", key.String()).BindError(&err)
+		defer g.End()
+	}
+
 	if strings.ToLower(key.Scheme) != "file" {
-		return nil, errors.New("unsupported scheme")
+		return nil, errors.New("unsupported scheme '" + key.Scheme + "'")
 	}
 
 	// Everything other than "Path" is ignored

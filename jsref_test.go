@@ -2,10 +2,12 @@ package jsref_test
 
 import (
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"testing"
@@ -40,7 +42,7 @@ func Example() {
 	res.Resolve(v, "#/foo/2") // "quux" (resolve via `mp`)
 }
 
-func TestResolve(t *testing.T) {
+func TestResolveMemory(t *testing.T) {
 	m := map[string]interface{}{
 		"foo": []interface{}{
 			"bar",
@@ -64,6 +66,61 @@ func TestResolve(t *testing.T) {
 	mp := provider.NewMap()
 	mp.Set("obj2", map[string]string{"sub": "quux"})
 	res.AddProvider(mp)
+
+	ptrlist := make([]string, 0, len(data))
+	for ptr := range data {
+		ptrlist = append(ptrlist, ptr)
+	}
+	sort.Strings(ptrlist)
+
+	for _, ptr := range ptrlist {
+		expected := data[ptr]
+		v, err := res.Resolve(m, ptr)
+		if !assert.NoError(t, err, "Resolve(%s) should succeed", ptr) {
+			return
+		}
+		if !assert.Equal(t, v, expected, "Resolve(%s) resolves to '%s'", ptr, expected) {
+			return
+		}
+	}
+}
+
+func TestResolveFS(t *testing.T) {
+	dir, err := ioutil.TempDir("", "jsref-test-")
+	if !assert.NoError(t, err, "creating temporary directory should succeed") {
+		return
+	}
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, "obj2")
+	f, err := os.Create(path)
+	if !assert.NoError(t, err, "creating %s file should succeed", path) {
+		return
+	}
+	f.Write([]byte(`{"sub":"quux"}`))
+	f.Close()
+
+	m := map[string]interface{}{
+		"foo": []interface{}{
+			"bar",
+			map[string]interface{}{
+				"$ref": "#/sub",
+			},
+			map[string]interface{}{
+				"$ref": "file:///obj2#/sub",
+			},
+		},
+		"sub": "baz",
+	}
+
+	data := map[string]string{
+		"#/foo/0": "bar",
+		"#/foo/1": "baz",
+		"#/foo/2": "quux",
+	}
+
+	res := jsref.New()
+	res.AddProvider(provider.NewFS(dir))
 
 	ptrlist := make([]string, 0, len(data))
 	for ptr := range data {
