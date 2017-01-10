@@ -18,30 +18,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Example() {
-	var v interface{}
-	src := []byte(`
-{
-  "foo": ["bar", {"$ref": "#/sub"}, {"$ref", "obj2#/sub"}],
-  "sub": "baz"
-}`)
-	if err := json.Unmarshal(src, &v); err != nil {
-		log.Printf("%s", err)
-		return
-	}
-
-	// External reference
-	mp := provider.NewMap()
-	mp.Set("obj2", map[string]string{"sub": "quux"})
-
-	res := jsref.New()
-	res.AddProvider(mp) // Register the provider
-
-	res.Resolve(v, "#/foo/0") // "bar"
-	res.Resolve(v, "#/foo/1") // "baz"
-	res.Resolve(v, "#/foo/2") // "quux" (resolve via `mp`)
-}
-
 func TestResolveMemory(t *testing.T) {
 	m := map[string]interface{}{
 		"foo": []interface{}{
