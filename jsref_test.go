@@ -18,30 +18,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Example() {
-	var v interface{}
-	src := []byte(`
-{
-  "foo": ["bar", {"$ref": "#/sub"}, {"$ref", "obj2#/sub"}],
-  "sub": "baz"
-}`)
-	if err := json.Unmarshal(src, &v); err != nil {
-		log.Printf("%s", err)
-		return
-	}
-
-	// External reference
-	mp := provider.NewMap()
-	mp.Set("obj2", map[string]string{"sub": "quux"})
-
-	res := jsref.New()
-	res.AddProvider(mp) // Register the provider
-
-	res.Resolve(v, "#/foo/0") // "bar"
-	res.Resolve(v, "#/foo/1") // "baz"
-	res.Resolve(v, "#/foo/2") // "quux" (resolve via `mp`)
-}
-
 func TestResolveMemory(t *testing.T) {
 	m := map[string]interface{}{
 		"foo": []interface{}{
@@ -202,6 +178,27 @@ func TestResolveRecursive(t *testing.T) {
 	res := jsref.New()
 	_, err := res.Resolve(v, "#/foo") // "bar"
 	if !assert.NoError(t, err, "res.Resolve should succeed") {
+		return
+	}
+}
+
+func TestGHPR12(t *testing.T) {
+	// https://github.com/lestrrat/go-jsref/pull/2 gave me an example
+	// using "foo" as the JS pointer (could've been a typo)
+	// but it gave me weird results, so this is where I'm testing it
+	var v interface{}
+	src := []byte(`
+{
+	"foo": "bar"
+}`)
+	if err := json.Unmarshal(src, &v); err != nil {
+		log.Printf("%s", err)
+		return
+	}
+
+	res := jsref.New()
+	_, err := res.Resolve(v, "foo")
+	if !assert.NoError(t, err, "res.Resolve should fail") {
 		return
 	}
 }

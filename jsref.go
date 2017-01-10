@@ -37,6 +37,7 @@ type resolveCtx struct {
 //    [scheme:opaque[?query]]#fragment
 //
 // where everything except for `#fragment` is optional.
+// If the fragment is empty, an error is returned.
 //
 // If `spec` is the empty string, `v` is returned
 // This method handles recursive JSON references.
@@ -206,6 +207,13 @@ func evalptr(ctx resolveCtx, r *Resolver, v interface{}, ptrspec string) (ret in
 	}
 
 	ptr := u.Fragment
+
+	// We are evaluating the pointer part. That means if the
+	// Fragment portion is not set, there's no point in evaluating
+	if ptr == "" {
+		return nil, errors.Wrap(err, "empty json pointer")
+	}
+
 	p, err := jspointer.New(ptr)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed create a new JSON pointer")
