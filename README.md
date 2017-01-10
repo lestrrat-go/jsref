@@ -9,7 +9,10 @@ JSON Reference Implementation for Go
 # SYNOPSIS
 
 ```go
+package main
+
 import (
+  "fmt"
   "encoding/json"
   "log"
 
@@ -17,11 +20,11 @@ import (
   "github.com/lestrrat/go-jsref/provider"
 )
 
-func Example() {
+func main() {
   var v interface{}
   src := []byte(`
 {
-  "foo": ["bar", {"$ref": "#/sub"}, {"$ref", "obj2#/sub"}],
+  "foo": ["bar", {"$ref": "#/sub"}, {"$ref": "obj2#/sub"}],
   "sub": "baz"
 }`)
   if err := json.Unmarshal(src, &v); err != nil {
@@ -36,9 +39,12 @@ func Example() {
   res := jsref.New()
   res.AddProvider(mp) // Register the provider
 
-  res.Resolve(v, "#/foo/0") // "bar"
-  res.Resolve(v, "#/foo/1") // "baz"
-  res.Resolve(v, "#/foo/2") // "quux" (resolve via `mp`)
+  ptrs := []string{"#/foo/0", "#/foo/1", "#/foo/2", "foo"}
+  for _, ptr := range(ptrs) {
+    result, _ := res.Resolve(v, ptr)
+    b, _ := json.Marshal(result)
+    fmt.Printf("%s -> %s\n", ptr, string(b))
+  }
 }
 ```
 
