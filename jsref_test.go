@@ -59,6 +59,16 @@ func TestResolveMemory(t *testing.T) {
 			return
 		}
 	}
+
+	// In this test we test if we can optionally recursively
+	// resolve references
+	v, err := res.Resolve(m, "#/foo", jsref.WithRecursiveResolution(true))
+	if !assert.NoError(t, err, "Resolve(%s) should succeed", "#/foo") {
+		return
+	}
+	if !assert.Equal(t, []interface{}{"bar", "baz", "quux"}, v) {
+		return
+	}
 }
 
 func TestResolveFS(t *testing.T) {
