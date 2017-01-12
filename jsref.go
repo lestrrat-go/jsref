@@ -65,6 +65,9 @@ type resolveCtx struct {
 // If `WithRecursiveResolution` option is given and its value is true,
 // an attempt to resolve all references within the resulting object
 // is made by traversing the structure recursively.
+// Please note that recursive resolution of the result is still
+// experimental. If you find problems, please submit a pull request
+// with a failing test case.
 func (r *Resolver) Resolve(v interface{}, ptr string, options ...Option) (ret interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.Marker("Resolver.Resolve(%s)", ptr).BindError(&err)
@@ -104,52 +107,72 @@ func (r *Resolver) Resolve(v interface{}, ptr string, options ...Option) (ret in
 	return result, nil
 }
 
+func setPtrOrInterface(container, value reflect.Value) bool {
+	switch container.Kind() {
+	case reflect.Ptr:
+		if !value.CanAddr() {
+			return false
+		}
+		container.Set(value.Addr())
+	case reflect.Interface:
+		container.Set(value)
+	default:
+		return false
+	}
+	return true
+}
+
 func traverseExpandRefRecursive(ctx *resolveCtx, r *Resolver, rv reflect.Value) error {
+	var container reflect.Value
 	switch rv.Kind() {
 	case reflect.Ptr, reflect.Interface:
+		container = rv
 		rv = rv.Elem()
 	}
 
 	switch rv.Kind() {
-	case reflect.Slice:
+	case reflect.Array, reflect.Slice:
 		for i := 0; i < rv.Len(); i++ {
 			elem := rv.Index(i)
-			if !elem.CanSet() {
-				continue
+			var elemcontainer reflect.Value
+			switch elem.Kind() {
+			case reflect.Ptr, reflect.Interface:
+				elemcontainer = elem
+				elem = elem.Elem()
+			}
+
+			if elemcontainer.IsValid() {
+				if !elemcontainer.CanSet() {
+					continue
+				}
 			}
 			newv, err := expandRefRecursive(ctx, r, elem.Interface())
 			if err != nil {
 				return errors.Wrap(err, `failed to expand array/slice element`)
 			}
-			elem.Set(reflect.ValueOf(newv))
+			newrv := reflect.ValueOf(newv)
+			if elemcontainer.IsValid() {
+				setPtrOrInterface(elemcontainer, newrv)
+			} else {
+				elem.Set(newrv)
+			}
 			traverseExpandRefRecursive(ctx, r, elem)
 		}
-	case reflect.Map:
-		for _, key := range rv.MapKeys() {
-			elem := rv.MapIndex(key)
-			if !elem.CanSet() {
-				continue
-			}
-			newv, err := expandRefRecursive(ctx, r, elem.Interface())
-			if err != nil {
-				return errors.Wrap(err, `failed to expand map element`)
-			}
-			elem.Set(reflect.ValueOf(newv))
-			traverseExpandRefRecursive(ctx, r, elem)
+	case reflect.Map, reflect.Struct:
+		if _, err := findRef(rv.Interface()); err != nil {
+			// not finding a ref is a good thing :D
+			return nil
 		}
-	case reflect.Struct:
-		for i := 0; i < rv.NumField(); i++ {
-			elem := rv.Field(i)
-			if !elem.CanSet() {
-				continue
-			}
-			newv, err := expandRefRecursive(ctx, r, elem.Interface())
-			if err != nil {
-				return errors.Wrap(err, `failed to expand map element`)
-			}
-			elem.Set(reflect.ValueOf(newv))
-			traverseExpandRefRecursive(ctx, r, elem)
+		newv, err := expandRefRecursive(ctx, r, rv.Interface())
+		if err != nil {
+			return errors.Wrap(err, `failed to expand map/struct element`)
 		}
+		newrv := reflect.ValueOf(newv)
+		if container.IsValid() {
+			setPtrOrInterface(container, newrv)
+		}
+
+		traverseExpandRefRecursive(ctx, r, newrv)
 	}
 	return nil
 }

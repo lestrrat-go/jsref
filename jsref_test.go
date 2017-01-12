@@ -177,7 +177,7 @@ func TestResolveRecursive(t *testing.T) {
 {
 	"foo": {
 		"type": "array",
-		"items": { "$ref": "#" }
+		"items": [{ "$ref": "#" }]
 	}
 }`)
 	if err := json.Unmarshal(src, &v); err != nil {
