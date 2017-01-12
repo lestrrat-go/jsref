@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,52 @@ func TestGHPR12(t *testing.T) {
 	_, err := res.Resolve(v, "foo")
 	if !assert.NoError(t, err, "res.Resolve should fail") {
 		return
+	}
+}
+
+func TestHyperSchemaRecursive(t *testing.T) {
+	src := []byte(`
+{
+  "definitions": {
+    "virtual_machine": {
+      "type": "object"
+    }
+  },
+  "links": [
+    {
+      "schema": {
+        "type": "object"
+      },
+      "targetSchema": {
+        "$ref": "#/definitions/virtual_machine"
+      }
+    },
+    {
+      "targetSchema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/virtual_machine"
+        }
+      }
+    }
+  ]
+}`)
+	var v interface{}
+	err := json.Unmarshal(src, &v)
+	assert.Nil(t, err)
+	res := jsref.New()
+
+	ptrs := []string{
+		"#/links/0/schema",
+		"#/links/0/targetSchema",
+		"#/links/1/targetSchema",
+	}
+	for _, ptr := range ptrs {
+		result, err := res.Resolve(v, ptr, jsref.WithRecursiveResolution(true))
+		assert.Nil(t, err)
+		b, err := json.Marshal(result)
+		assert.Nil(t, err)
+		s := string(b)
+		assert.False(t, strings.Contains(s, "$ref"), ptr + " did not resolve")
 	}
 }
