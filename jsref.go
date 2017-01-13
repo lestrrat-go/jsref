@@ -23,6 +23,15 @@ type option struct {
 func (o option) Name() string       { return o.name }
 func (o option) Value() interface{} { return o.value }
 
+// WithRecursiveResolution allows ou to enable recursive resolution
+// on the *result* data structure. This means that after resolving
+// the JSON reference in the structure at hand, it does another
+// pass at resolving the entire data structure. Depending on your
+// structure and size, this may incur significant cost.
+//
+// Please note that recursive resolution of the result is still
+// experimental. If you find problems, please submit a pull request
+// with a failing test case.
 func WithRecursiveResolution(b bool) Option {
 	return &option{
 		name:  "recursiveResolution",
@@ -64,10 +73,7 @@ type resolveCtx struct {
 //
 // If `WithRecursiveResolution` option is given and its value is true,
 // an attempt to resolve all references within the resulting object
-// is made by traversing the structure recursively.
-// Please note that recursive resolution of the result is still
-// experimental. If you find problems, please submit a pull request
-// with a failing test case.
+// is made by traversing the structure recursively. Default is false
 func (r *Resolver) Resolve(v interface{}, ptr string, options ...Option) (ret interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.Marker("Resolver.Resolve(%s)", ptr).BindError(&err)
