@@ -53,6 +53,9 @@ func Example() {
       Ptr: "#/foo/2", // "quux" (resolves via `mp`)
     },
     {
+      Ptr: "#/foo",   // ["bar",{"$ref":"#/sub"},{"$ref":"obj2#/sub"}]
+    },
+    {
       Ptr: "#/foo",   // ["bar","baz","quux"]
       // experimental option to resolve all resulting values
       Options: []jsref.Option{ jsref.WithRecursiveResolution(true) },
@@ -72,6 +75,7 @@ func Example() {
   // #/foo/0 -> "bar"
   // #/foo/1 -> "baz"
   // #/foo/2 -> "quux"
+  // #/foo -> ["bar",{"$ref":"#/sub"},{"$ref":"obj2#/sub"}]
   // #/foo -> ["bar","baz","quux"]
 }
 ```
