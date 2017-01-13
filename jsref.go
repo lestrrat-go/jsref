@@ -10,6 +10,9 @@ import (
 	"github.com/pkg/errors"
 )
 
+const ref = "$ref"
+var refrv = reflect.ValueOf(ref)
+
 type Option interface {
 	Name() string
 	Value() interface{}
@@ -300,16 +303,20 @@ func findRef(v interface{}) (ref string, err error) {
 	}
 
 	// Find if we have a "$ref" element
-	refv := zeroval
+	var refv reflect.Value
 	switch rv.Kind() {
 	case reflect.Map:
-		refv = rv.MapIndex(reflect.ValueOf("$ref"))
+		refv = rv.MapIndex(refrv)
 	case reflect.Struct:
-		if fn := structinfo.StructFieldFromJSONName(rv, "$ref"); fn != "" {
+		if fn := structinfo.StructFieldFromJSONName(rv, ref); fn != "" {
 			refv = rv.FieldByName(fn)
 		}
 	default:
 		return "", errors.New("element is not a map-like container")
+	}
+
+	if !refv.IsValid() {
+		return "", errors.New("$ref element not found")
 	}
 
 	switch refv.Kind() {
@@ -320,14 +327,13 @@ func findRef(v interface{}) (ref string, err error) {
 	switch refv.Kind() {
 	case reflect.String:
 		// Empty string isn't a valid pointer
-		ref := refv.String()
-		if ref == "" {
+		if refv.Len() <= 0 {
 			return "", errors.New("$ref element not found (empty)")
 		}
 		if pdebug.Enabled {
-			pdebug.Printf("Found ref '%s'", ref)
+			pdebug.Printf("Found ref '%s'", refv)
 		}
-		return ref, nil
+		return refv.String(), nil
 	case reflect.Invalid:
 		return "", errors.New("$ref element not found")
 	default:
