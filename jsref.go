@@ -99,9 +99,11 @@ func (r *Resolver) Resolve(v interface{}, ptr string, options ...Option) (ret in
 	}
 
 	if recursiveResolution {
-		if err := traverseExpandRefRecursive(&ctx, r, reflect.ValueOf(result)); err != nil {
+		rv, err := traverseExpandRefRecursive(&ctx, r, reflect.ValueOf(result))
+		if err != nil {
 			return nil, errors.Wrap(err, `failed to resolve result`)
 		}
+		result = rv.Interface()
 	}
 
 	return result, nil
@@ -122,11 +124,14 @@ func setPtrOrInterface(container, value reflect.Value) bool {
 	return true
 }
 
-func traverseExpandRefRecursive(ctx *resolveCtx, r *Resolver, rv reflect.Value) error {
-	var container reflect.Value
+func traverseExpandRefRecursive(ctx *resolveCtx, r *Resolver, rv reflect.Value) (reflect.Value, error) {
+	if pdebug.Enabled {
+		g := pdebug.Marker("traverseExpandRefRecursive")
+		defer g.End()
+	}
+
 	switch rv.Kind() {
 	case reflect.Ptr, reflect.Interface:
-		container = rv
 		rv = rv.Elem()
 	}
 
@@ -148,33 +153,58 @@ func traverseExpandRefRecursive(ctx *resolveCtx, r *Resolver, rv reflect.Value) 
 			}
 			newv, err := expandRefRecursive(ctx, r, elem.Interface())
 			if err != nil {
-				return errors.Wrap(err, `failed to expand array/slice element`)
+				return zeroval, errors.Wrap(err, `failed to expand array/slice element`)
 			}
-			newrv := reflect.ValueOf(newv)
+			newrv, err := traverseExpandRefRecursive(ctx, r, reflect.ValueOf(newv))
+			if err != nil {
+				return zeroval, errors.Wrap(err, `failed to recurse into array/slice element`)
+			}
+
 			if elemcontainer.IsValid() {
 				setPtrOrInterface(elemcontainer, newrv)
 			} else {
 				elem.Set(newrv)
 			}
-			traverseExpandRefRecursive(ctx, r, elem)
 		}
-	case reflect.Map, reflect.Struct:
+	case reflect.Map:
+		// No refs found in the map keys, but there could be more
+		// in the values
 		if _, err := findRef(rv.Interface()); err != nil {
-			// not finding a ref is a good thing :D
-			return nil
+			for _, key := range rv.MapKeys() {
+				value, err := traverseExpandRefRecursive(ctx, r, rv.MapIndex(key))
+				if err != nil {
+					return zeroval, errors.Wrap(err, `failed to traverse map value`)
+				}
+				rv.SetMapIndex(key, value)
+			}
+			return rv, nil
 		}
 		newv, err := expandRefRecursive(ctx, r, rv.Interface())
 		if err != nil {
-			return errors.Wrap(err, `failed to expand map/struct element`)
+			return zeroval, errors.Wrap(err, `failed to expand map element`)
 		}
-		newrv := reflect.ValueOf(newv)
-		if container.IsValid() {
-			setPtrOrInterface(container, newrv)
+		return traverseExpandRefRecursive(ctx, r, reflect.ValueOf(newv))
+	case reflect.Struct:
+		// No refs found in the map keys, but there could be more
+		// in the values
+		if _, err := findRef(rv.Interface()); err != nil {
+			for i := 0; i < rv.NumField(); i++ {
+				field := rv.Field(i)
+				value, err := traverseExpandRefRecursive(ctx, r, field)
+				if err != nil {
+					return zeroval, errors.Wrap(err, `failed to traverse struct field value`)
+				}
+				field.Set(value)
+			}
+			return rv, nil
 		}
-
-		traverseExpandRefRecursive(ctx, r, newrv)
+		newv, err := expandRefRecursive(ctx, r, rv.Interface())
+		if err != nil {
+			return zeroval, errors.Wrap(err, `failed to expand struct element`)
+		}
+		return traverseExpandRefRecursive(ctx, r, reflect.ValueOf(newv))
 	}
-	return nil
+	return rv, nil
 }
 
 // expands $ref with in v, until all $refs are expanded.

@@ -67,6 +67,7 @@ func TestResolveMemory(t *testing.T) {
 	if !assert.NoError(t, err, "Resolve(%s) should succeed", "#/foo") {
 		return
 	}
+
 	if !assert.Equal(t, []interface{}{"bar", "baz", "quux"}, v) {
 		return
 	}
@@ -255,8 +256,12 @@ func TestHyperSchemaRecursive(t *testing.T) {
 		result, err := res.Resolve(v, ptr, jsref.WithRecursiveResolution(true))
 		assert.Nil(t, err)
 		b, err := json.Marshal(result)
-		assert.Nil(t, err)
-		s := string(b)
-		assert.False(t, strings.Contains(s, "$ref"), ptr + " did not resolve")
+		if !assert.NoError(t, err, "json.Marshal should succeed") {
+			return
+		}
+		if !assert.False(t, strings.Contains(string(b), "$ref"), "%s did not recursively resolve", ptr) {
+			t.Logf("resolved to '%s'", b)
+			return
+		}
 	}
 }
