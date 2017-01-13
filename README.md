@@ -39,20 +39,36 @@ func Example() {
   res := jsref.New()
   res.AddProvider(mp) // Register the provider
 
-  ptrs := []string{
-    "#/foo/0", // "bar"
-    "#/foo/1", // "baz"
-    "#/foo/2", // "quux" (resolves via `mp`)
-    "#/foo",   // contents of foo key
+  data := []struct {
+    Ptr string
+    Options []jsref.Option
+  }{
+    {
+      Ptr: "#/foo/0", // "bar"
+    },
+    {
+      Ptr: "#/foo/1", // "baz"
+    },
+    {
+      Ptr: "#/foo/2", // "quux" (resolves via `mp`)
+    },
+    {
+      Ptr: "#/foo",   // ["bar",{"$ref":"#/sub"},{"$ref":"obj2#/sub"}]
+    },
+    {
+      Ptr: "#/foo",   // ["bar","baz","quux"]
+      // experimental option to resolve all resulting values
+      Options: []jsref.Option{ jsref.WithRecursiveResolution(true) },
+    },
   }
-  for _, ptr := range ptrs {
-    result, err := res.Resolve(v, ptr)
+  for _, set := range data {
+    result, err := res.Resolve(v, set.Ptr, set.Options...)
     if err != nil { // failed to resolve
       fmt.Printf("err: %s\n", err)
       continue
     }
     b, _ := json.Marshal(result)
-    fmt.Printf("%s -> %s\n", ptr, string(b))
+    fmt.Printf("%s -> %s\n", set.Ptr, string(b))
   }
 
   // OUTPUT:
@@ -60,6 +76,7 @@ func Example() {
   // #/foo/1 -> "baz"
   // #/foo/2 -> "quux"
   // #/foo -> ["bar",{"$ref":"#/sub"},{"$ref":"obj2#/sub"}]
+  // #/foo -> ["bar","baz","quux"]
 }
 ```
 
@@ -84,3 +101,7 @@ Currently available `Provider`s are:
 | [go-jshschema](https://github.com/lestrrat/go-jsschema)  | JSON Hyper Schema implementation |
 | [go-jsschema](https://github.com/lestrrat/go-jsschema)   | JSON Schema implementation       |
 | [go-jspointer](https://github.com/lestrrat/go-jspointer) | JSON Pointer implementations     |
+
+# Acknowledgements
+
+* Boris Burtin

@@ -10,6 +10,35 @@ import (
 	"github.com/pkg/errors"
 )
 
+type Option interface {
+	Name() string
+	Value() interface{}
+}
+
+type option struct {
+	name  string
+	value interface{}
+}
+
+func (o option) Name() string       { return o.name }
+func (o option) Value() interface{} { return o.value }
+
+// WithRecursiveResolution allows ou to enable recursive resolution
+// on the *result* data structure. This means that after resolving
+// the JSON reference in the structure at hand, it does another
+// pass at resolving the entire data structure. Depending on your
+// structure and size, this may incur significant cost.
+//
+// Please note that recursive resolution of the result is still
+// experimental. If you find problems, please submit a pull request
+// with a failing test case.
+func WithRecursiveResolution(b bool) Option {
+	return &option{
+		name:  "recursiveResolution",
+		value: b,
+	}
+}
+
 var DefaultMaxRecursions = 10
 
 // New creates a new Resolver
@@ -41,10 +70,21 @@ type resolveCtx struct {
 //
 // If `spec` is the empty string, `v` is returned
 // This method handles recursive JSON references.
-func (r *Resolver) Resolve(v interface{}, ptr string) (ret interface{}, err error) {
+//
+// If `WithRecursiveResolution` option is given and its value is true,
+// an attempt to resolve all references within the resulting object
+// is made by traversing the structure recursively. Default is false
+func (r *Resolver) Resolve(v interface{}, ptr string, options ...Option) (ret interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.Marker("Resolver.Resolve(%s)", ptr).BindError(&err)
 		defer g.End()
+	}
+	var recursiveResolution bool
+	for _, opt := range options {
+		switch opt.Name() {
+		case "recursiveResolution":
+			recursiveResolution = opt.Value().(bool)
+		}
 	}
 
 	ctx := resolveCtx{
@@ -54,15 +94,128 @@ func (r *Resolver) Resolve(v interface{}, ptr string) (ret interface{}, err erro
 	}
 
 	// First, expand the target as much as we can
-	v, err = expandRefRecursive(ctx, r, v)
+	v, err = expandRefRecursive(&ctx, r, v)
 	if err != nil {
 		return nil, errors.Wrap(err, "recursive search failed")
 	}
 
-	return evalptr(ctx, r, v, ptr)
+	result, err := evalptr(&ctx, r, v, ptr)
+	if err != nil {
+		return nil, err
+	}
+
+	if recursiveResolution {
+		rv, err := traverseExpandRefRecursive(&ctx, r, reflect.ValueOf(result))
+		if err != nil {
+			return nil, errors.Wrap(err, `failed to resolve result`)
+		}
+		result = rv.Interface()
+	}
+
+	return result, nil
 }
 
-func expandRefRecursive(ctx resolveCtx, r *Resolver, v interface{}) (ret interface{}, err error) {
+func setPtrOrInterface(container, value reflect.Value) bool {
+	switch container.Kind() {
+	case reflect.Ptr:
+		if !value.CanAddr() {
+			return false
+		}
+		container.Set(value.Addr())
+	case reflect.Interface:
+		container.Set(value)
+	default:
+		return false
+	}
+	return true
+}
+
+func traverseExpandRefRecursive(ctx *resolveCtx, r *Resolver, rv reflect.Value) (reflect.Value, error) {
+	if pdebug.Enabled {
+		g := pdebug.Marker("traverseExpandRefRecursive")
+		defer g.End()
+	}
+
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Interface:
+		rv = rv.Elem()
+	}
+
+	switch rv.Kind() {
+	case reflect.Array, reflect.Slice:
+		for i := 0; i < rv.Len(); i++ {
+			elem := rv.Index(i)
+			var elemcontainer reflect.Value
+			switch elem.Kind() {
+			case reflect.Ptr, reflect.Interface:
+				elemcontainer = elem
+				elem = elem.Elem()
+			}
+
+			if elemcontainer.IsValid() {
+				if !elemcontainer.CanSet() {
+					continue
+				}
+			}
+			newv, err := expandRefRecursive(ctx, r, elem.Interface())
+			if err != nil {
+				return zeroval, errors.Wrap(err, `failed to expand array/slice element`)
+			}
+			newrv, err := traverseExpandRefRecursive(ctx, r, reflect.ValueOf(newv))
+			if err != nil {
+				return zeroval, errors.Wrap(err, `failed to recurse into array/slice element`)
+			}
+
+			if elemcontainer.IsValid() {
+				setPtrOrInterface(elemcontainer, newrv)
+			} else {
+				elem.Set(newrv)
+			}
+		}
+	case reflect.Map:
+		// No refs found in the map keys, but there could be more
+		// in the values
+		if _, err := findRef(rv.Interface()); err != nil {
+			for _, key := range rv.MapKeys() {
+				value, err := traverseExpandRefRecursive(ctx, r, rv.MapIndex(key))
+				if err != nil {
+					return zeroval, errors.Wrap(err, `failed to traverse map value`)
+				}
+				rv.SetMapIndex(key, value)
+			}
+			return rv, nil
+		}
+		newv, err := expandRefRecursive(ctx, r, rv.Interface())
+		if err != nil {
+			return zeroval, errors.Wrap(err, `failed to expand map element`)
+		}
+		return traverseExpandRefRecursive(ctx, r, reflect.ValueOf(newv))
+	case reflect.Struct:
+		// No refs found in the map keys, but there could be more
+		// in the values
+		if _, err := findRef(rv.Interface()); err != nil {
+			for i := 0; i < rv.NumField(); i++ {
+				field := rv.Field(i)
+				value, err := traverseExpandRefRecursive(ctx, r, field)
+				if err != nil {
+					return zeroval, errors.Wrap(err, `failed to traverse struct field value`)
+				}
+				field.Set(value)
+			}
+			return rv, nil
+		}
+		newv, err := expandRefRecursive(ctx, r, rv.Interface())
+		if err != nil {
+			return zeroval, errors.Wrap(err, `failed to expand struct element`)
+		}
+		return traverseExpandRefRecursive(ctx, r, reflect.ValueOf(newv))
+	}
+	return rv, nil
+}
+
+// expands $ref with in v, until all $refs are expanded.
+// note: DOES NOT recurse down into structures
+func expandRefRecursive(ctx *resolveCtx, r *Resolver, v interface{}) (ret interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.Marker("expandRefRecursive")
 		defer g.End()
@@ -94,7 +247,7 @@ func expandRefRecursive(ctx resolveCtx, r *Resolver, v interface{}) (ret interfa
 	return v, nil
 }
 
-func expandRef(ctx resolveCtx, r *Resolver, v interface{}, ref string) (ret interface{}, err error) {
+func expandRef(ctx *resolveCtx, r *Resolver, v interface{}, ref string) (ret interface{}, err error) {
 	ctx.rlevel++
 	if ctx.rlevel > ctx.maxrlevel {
 		return nil, ErrMaxRecursion
@@ -186,7 +339,7 @@ func findRef(v interface{}) (ref string, err error) {
 	return "", errors.New("$ref element must be a string")
 }
 
-func evalptr(ctx resolveCtx, r *Resolver, v interface{}, ptrspec string) (ret interface{}, err error) {
+func evalptr(ctx *resolveCtx, r *Resolver, v interface{}, ptrspec string) (ret interface{}, err error) {
 	if pdebug.Enabled {
 		g := pdebug.Marker("evalptr(%s)", ptrspec).BindError(&err)
 		defer g.End()

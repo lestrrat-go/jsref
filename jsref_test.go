@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,17 @@ func TestResolveMemory(t *testing.T) {
 		if !assert.Equal(t, v, expected, "Resolve(%s) resolves to '%s'", ptr, expected) {
 			return
 		}
+	}
+
+	// In this test we test if we can optionally recursively
+	// resolve references
+	v, err := res.Resolve(m, "#/foo", jsref.WithRecursiveResolution(true))
+	if !assert.NoError(t, err, "Resolve(%s) should succeed", "#/foo") {
+		return
+	}
+
+	if !assert.Equal(t, []interface{}{"bar", "baz", "quux"}, v) {
+		return
 	}
 }
 
@@ -167,7 +179,7 @@ func TestResolveRecursive(t *testing.T) {
 {
 	"foo": {
 		"type": "array",
-		"items": { "$ref": "#" }
+		"items": [{ "$ref": "#" }]
 	}
 }`)
 	if err := json.Unmarshal(src, &v); err != nil {
@@ -200,5 +212,56 @@ func TestGHPR12(t *testing.T) {
 	_, err := res.Resolve(v, "foo")
 	if !assert.NoError(t, err, "res.Resolve should fail") {
 		return
+	}
+}
+
+func TestHyperSchemaRecursive(t *testing.T) {
+	src := []byte(`
+{
+  "definitions": {
+    "virtual_machine": {
+      "type": "object"
+    }
+  },
+  "links": [
+    {
+      "schema": {
+        "type": "object"
+      },
+      "targetSchema": {
+        "$ref": "#/definitions/virtual_machine"
+      }
+    },
+    {
+      "targetSchema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/virtual_machine"
+        }
+      }
+    }
+  ]
+}`)
+	var v interface{}
+	err := json.Unmarshal(src, &v)
+	assert.Nil(t, err)
+	res := jsref.New()
+
+	ptrs := []string{
+		"#/links/0/schema",
+		"#/links/0/targetSchema",
+		"#/links/1/targetSchema",
+	}
+	for _, ptr := range ptrs {
+		result, err := res.Resolve(v, ptr, jsref.WithRecursiveResolution(true))
+		assert.Nil(t, err)
+		b, err := json.Marshal(result)
+		if !assert.NoError(t, err, "json.Marshal should succeed") {
+			return
+		}
+		if !assert.False(t, strings.Contains(string(b), "$ref"), "%s did not recursively resolve", ptr) {
+			t.Logf("resolved to '%s'", b)
+			return
+		}
 	}
 }
