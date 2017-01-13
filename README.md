@@ -98,7 +98,7 @@ Currently available `Provider`s are:
 | Name                                                     | Notes                            |
 |:--------------------------------------------------------:|:---------------------------------|
 | [go-jsval](https://github.com/lestrrat/go-jsval)         | Validator generator              |
-| [go-jshschema](https://github.com/lestrrat/go-jsschema)  | JSON Hyper Schema implementation |
+| [go-jshschema](https://github.com/lestrrat/go-jshschema)  | JSON Hyper Schema implementation |
 | [go-jsschema](https://github.com/lestrrat/go-jsschema)   | JSON Schema implementation       |
 | [go-jspointer](https://github.com/lestrrat/go-jspointer) | JSON Pointer implementations     |
 
