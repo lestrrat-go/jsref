@@ -265,3 +265,31 @@ func TestHyperSchemaRecursive(t *testing.T) {
 		}
 	}
 }
+
+func TestGHIssue7(t *testing.T) {
+	src := []byte(`{
+  "status": {
+    "type": ["string", "null"],
+    "enum": [
+      "sent",
+      "duplicate",
+      "error",
+      "invalid",
+      "rejected",
+      "unqueued",
+      "unsubscribed",
+      null
+    ]
+  }
+}`)
+
+	var v interface{}
+	if !assert.NoError(t, json.Unmarshal(src, &v), `Unmarshal should succeed`) {
+		return
+	}
+
+	res := jsref.New()
+	result, err := res.Resolve(v, "", jsref.WithRecursiveResolution(true))
+	t.Logf("%s", result)
+	t.Logf("%s", err)
+}
