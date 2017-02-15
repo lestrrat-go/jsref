@@ -155,6 +155,12 @@ func traverseExpandRefRecursive(ctx *resolveCtx, r *Resolver, rv reflect.Value) 
 				elem = elem.Elem()
 			}
 
+			// Need to check for elem being Valid, otherwise the
+			// subsequent call to Interface() will fail
+			if !elem.IsValid() {
+				continue
+			}
+
 			if elemcontainer.IsValid() {
 				if !elemcontainer.CanSet() {
 					continue
