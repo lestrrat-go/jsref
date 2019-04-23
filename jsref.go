@@ -60,6 +60,8 @@ type resolveCtx struct {
 	rlevel    int         // recurse level
 	maxrlevel int         // max recurse level
 	object    interface{} // the main object that was passed to `Resolve()`
+	recursive bool	      // should traverseExpandRefRecursive or not
+	seen      []string    // loop detection
 }
 
 // Resolve takes a target `v`, and a JSON pointer `spec`.
@@ -94,6 +96,8 @@ func (r *Resolver) Resolve(v interface{}, ptr string, options ...Option) (ret in
 		rlevel:    0,
 		maxrlevel: r.MaxRecursions,
 		object:    v,
+		recursive: recursiveResolution,
+		seen:      []string{},
 	}
 
 	// First, expand the target as much as we can
@@ -257,12 +261,25 @@ func expandRefRecursive(ctx *resolveCtx, r *Resolver, v interface{}) (ret interf
 }
 
 func expandRef(ctx *resolveCtx, r *Resolver, v interface{}, ref string) (ret interface{}, err error) {
+	if pdebug.Enabled {
+		g := pdebug.Marker("expandRef %s", ref)
+		defer g.End()
+	}
 	ctx.rlevel++
 	if ctx.rlevel > ctx.maxrlevel {
 		return nil, ErrMaxRecursion
 	}
 
 	defer func() { ctx.rlevel-- }()
+
+	for _, s := range ctx.seen {
+		if s == ref {
+			if pdebug.Enabled {
+				pdebug.Printf("reference loop detected %s", ref)
+			}
+			return nil, ErrReferenceLoop
+		}
+	}
 
 	u, err := url.Parse(ref)
 	if err != nil {
@@ -273,6 +290,7 @@ func expandRef(ctx *resolveCtx, r *Resolver, v interface{}, ref string) (ret int
 	if u.Host == "" && u.Path == "" {
 		if pdebug.Enabled {
 			pdebug.Printf("ptr doesn't contain any host/path part, apply json pointer directly to object")
+			// pdebug.Printf("  %v", ctx.object)
 		}
 		return evalptr(ctx, r, ctx.object, ptr)
 	}
@@ -284,8 +302,32 @@ func expandRef(ctx *resolveCtx, r *Resolver, v interface{}, ref string) (ret int
 			if pdebug.Enabled {
 				pdebug.Printf("Found object matching %s", u)
 			}
+			newseen := append([]string{}, ctx.seen...)
+			newseen = append(newseen, ref)
+			ctx2 := &resolveCtx{
+				rlevel:    ctx.rlevel,
+				maxrlevel: ctx.maxrlevel,
+				object:    pv,
+				recursive: ctx.recursive,
+				seen:      newseen,
+			}
+			pv, err := evalptr(ctx2, r, pv, ptr)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed on ptr")
+			}
+			if !ctx.recursive {
+				return pv, nil
+			}
 
-			return evalptr(ctx, r, pv, ptr)
+			pv, err = expandRefRecursive(ctx2, r, pv)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to expand external reference")
+			}
+			rv, err := traverseExpandRefRecursive(ctx2, r, reflect.ValueOf(pv))
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to traverse external reference")
+			}
+			return rv.Interface(), nil
 		}
 	}
 
@@ -335,6 +377,9 @@ func findRef(v interface{}) (ref string, err error) {
 		// Empty string isn't a valid pointer
 		if refv.Len() <= 0 {
 			return "", errors.New("$ref element not found (empty)")
+		}
+		if refv.String() == "#" {
+			return "", errors.New("$ref to '#' skipped")
 		}
 		if pdebug.Enabled {
 			pdebug.Printf("Found ref '%s'", refv)
