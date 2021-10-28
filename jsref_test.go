@@ -41,8 +41,13 @@ func TestResolveMemory(t *testing.T) {
 
 	res := jsref.New()
 	mp := provider.NewMap()
-	mp.Set("obj2", map[string]string{"sub": "quux"})
-	res.AddProvider(mp)
+	if !assert.NoError(t, mp.Set("obj2", map[string]string{"sub": "quux"}), `mp.Set("obj2") should succeed`) {
+		return
+	}
+
+	if !assert.NoError(t, res.AddProvider(mp), `res.AddProvider() should succeed`) {
+		return
+	}
 
 	ptrlist := make([]string, 0, len(data))
 	for ptr := range data {
@@ -85,7 +90,7 @@ func TestResolveFS(t *testing.T) {
 	if !assert.NoError(t, err, "creating %s file should succeed", path) {
 		return
 	}
-	f.Write([]byte(`{"sub":"quux"}`))
+	_, _ = f.Write([]byte(`{"sub":"quux"}`))
 	f.Close()
 
 	m := map[string]interface{}{
@@ -108,7 +113,9 @@ func TestResolveFS(t *testing.T) {
 	}
 
 	res := jsref.New()
-	res.AddProvider(provider.NewFS(dir))
+	if !assert.NoError(t, res.AddProvider(provider.NewFS(dir)), `res.AddProvider() should succeed`) {
+		return
+	}
 
 	ptrlist := make([]string, 0, len(data))
 	for ptr := range data {
@@ -148,7 +155,9 @@ func TestResolveHTTP(t *testing.T) {
 
 	res := jsref.New()
 	hp := provider.NewHTTP()
-	res.AddProvider(hp)
+	if !assert.NoError(t, res.AddProvider(hp), `res.AddProvider() should succeed`) {
+		return
+	}
 
 	m := map[string]interface{}{
 		"fetch": map[string]string{
@@ -162,10 +171,9 @@ func TestResolveHTTP(t *testing.T) {
 		return
 	}
 
-	switch v.(type) {
+	switch v := v.(type) {
 	case map[string]interface{}:
-		mv := v.(map[string]interface{})
-		if !assert.Equal(t, mv["id"], schemaURL, "Resolve("+schemaURL+") resolved to JSON schema") {
+		if !assert.Equal(t, v["id"], schemaURL, "Resolve("+schemaURL+") resolved to JSON schema") {
 			return
 		}
 	default:
@@ -346,9 +354,15 @@ func TestReferenceNewRoot(t *testing.T) {
 
 	res := jsref.New()
 	mp := provider.NewMap()
-	mp.Set("obj1", obj1)
-	mp.Set("obj2", obj2)
-	res.AddProvider(mp)
+	if !assert.NoError(t, mp.Set("obj1", obj1), `mp.Set("obj1") should succeed`) {
+		return
+	}
+	if !assert.NoError(t, mp.Set("obj2", obj2), `mp.Set("obj2") should succeed`) {
+		return
+	}
+	if !assert.NoError(t, res.AddProvider(mp), `res.AddProvider() should succeed`) {
+		return
+	}
 
 	ptrlist := make([]string, 0, len(data))
 	for ptr := range data {
@@ -411,9 +425,15 @@ func TestReferenceLoop(t *testing.T) {
 
 	res := jsref.New()
 	mp := provider.NewMap()
-	mp.Set("obj1", obj1)
-	mp.Set("obj2", obj2)
-	res.AddProvider(mp)
+	if !assert.NoError(t, mp.Set("obj1", obj1), `mp.Set("obj1") should succeed`) {
+		return
+	}
+	if !assert.NoError(t, mp.Set("obj2", obj2), `mp.Set("obj2") should succeed`) {
+		return
+	}
+	if !assert.NoError(t, res.AddProvider(mp), `res.AddProvider() should succeed`) {
+		return
+	}
 
 	ptrlist := make([]string, 0, len(data))
 	for ptr := range data {

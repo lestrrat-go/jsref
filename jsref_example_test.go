@@ -23,10 +23,10 @@ func Example() {
 
 	// External reference
 	mp := provider.NewMap()
-	mp.Set("obj2", map[string]string{"sub": "quux"})
+	_ = mp.Set("obj2", map[string]string{"sub": "quux"})
 
 	res := jsref.New()
-	res.AddProvider(mp) // Register the provider
+	_ = res.AddProvider(mp) // Register the provider
 
 	data := []struct {
 		Ptr string

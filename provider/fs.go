@@ -64,7 +64,9 @@ func (fp *FS) Get(key *url.URL) (out interface{}, err error) {
 		return nil, errors.Wrap(err, "failed to parse JSON local resource")
 	}
 
-	fp.mp.Set(path, x)
+	if err := fp.mp.Set(path, x); err != nil {
+		return nil, errors.Wrapf(err, `failed to set value to %q`, path)
+	}
 
 	return x, nil
 }
