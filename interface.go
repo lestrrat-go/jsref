@@ -9,6 +9,7 @@ import (
 var zeroval = reflect.Value{}
 
 var ErrMaxRecursion = errors.New("reached max number of recursions")
+var ErrReferenceLoop = errors.New("reference loop detected")
 
 // Resolver is responsible for interpreting the provided JSON
 // reference.

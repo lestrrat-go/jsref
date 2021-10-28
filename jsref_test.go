@@ -293,3 +293,155 @@ func TestGHIssue7(t *testing.T) {
 	t.Logf("%s", result)
 	t.Logf("%s", err)
 }
+
+func TestReferenceNewRoot(t *testing.T) {
+	obj1 := map[string]interface{}{
+		"foo": []interface{}{
+			"bar",
+			map[string]interface{}{
+				"$ref": "#/sub",
+			},
+			map[string]interface{}{
+				"$ref": "obj2#/bar/sub",
+			},
+			map[string]interface{}{
+				"$ref": "obj2#/baz",
+			},
+			map[string]interface{}{
+				"$ref": "obj2#/hoge",
+			},
+		},
+		"sub": "baz",
+		"piyo": map[string]interface{}{
+			// piyo loops on obj1 and obj2, but should not be problem unless we dereference
+			"$ref": "obj2#",
+		},
+	}
+	obj2 := map[string]interface{}{
+		"bar": map[string]interface{}{
+			"sub": "quux",
+		},
+		"baz": map[string]interface{}{
+			"$ref": "obj1#/sub",
+		},
+		"hoge": map[string]interface{}{
+			// should refer to obj2, not obj1
+			"$ref": "#/bar/sub",
+		},
+		"fuga": map[string]interface{}{
+			"$ref": "#",
+		},
+		"piyo": map[string]interface{}{
+			"$ref": "obj1#",
+		},
+	}
+
+	data := map[string]string{
+		"#/foo/0": "bar",
+		"#/foo/1": "baz",
+		"#/foo/2": "quux",
+		"#/foo/3": "baz",
+		"#/foo/4": "quux",
+	}
+
+	res := jsref.New()
+	mp := provider.NewMap()
+	mp.Set("obj1", obj1)
+	mp.Set("obj2", obj2)
+	res.AddProvider(mp)
+
+	ptrlist := make([]string, 0, len(data))
+	for ptr := range data {
+		ptrlist = append(ptrlist, ptr)
+	}
+	sort.Strings(ptrlist)
+
+	for _, ptr := range ptrlist {
+		expected := data[ptr]
+		v, err := res.Resolve(obj1, ptr)
+		if !assert.NoError(t, err, "Resolve(%s) should succeed", ptr) {
+			return
+		}
+		if !assert.Equal(t, v, expected, "Resolve(%s) resolves to '%s'", ptr, expected) {
+			return
+		}
+	}
+
+	// In this test we test if we can optionally recursively
+	// resolve references
+	v, err := res.Resolve(obj1, "#/foo", jsref.WithRecursiveResolution(true))
+	if !assert.NoError(t, err, "Resolve(%s) should succeed", "#/foo") {
+		return
+	}
+
+	if !assert.Equal(t, []interface{}{"bar", "baz", "quux", "baz", "quux"}, v) {
+		return
+	}
+}
+
+func TestReferenceLoop(t *testing.T) {
+	obj1 := map[string]interface{}{
+		"foo": []interface{}{
+			"bar",
+			map[string]interface{}{
+				"$ref": "#/sub",
+			},
+			map[string]interface{}{
+				"$ref": "obj2#/bar",
+			},
+			map[string]interface{}{
+				"$ref": "obj2#/baz",
+			},
+		},
+		"sub": "baz",
+	}
+	obj2 := map[string]interface{}{
+		"bar": map[string]interface{}{
+			"$ref": "obj1#/sub",
+		},
+		"baz": map[string]interface{}{
+			"$ref": "obj1#/foo",
+		},
+	}
+
+	data := map[string]string{
+		"#/foo/0": "bar",
+		"#/foo/1": "baz",
+	}
+
+	res := jsref.New()
+	mp := provider.NewMap()
+	mp.Set("obj1", obj1)
+	mp.Set("obj2", obj2)
+	res.AddProvider(mp)
+
+	ptrlist := make([]string, 0, len(data))
+	for ptr := range data {
+		ptrlist = append(ptrlist, ptr)
+	}
+	sort.Strings(ptrlist)
+
+	for _, ptr := range ptrlist {
+		expected := data[ptr]
+		v, err := res.Resolve(obj1, ptr)
+		if !assert.NoError(t, err, "Resolve(%s) should succeed", ptr) {
+			return
+		}
+		if !assert.Equal(t, v, expected, "Resolve(%s) resolves to '%s'", ptr, expected) {
+			return
+		}
+	}
+
+	// Recursive resolution cause infinite loop.
+	// Should report an error.
+	_, err := res.Resolve(obj1, "#/foo", jsref.WithRecursiveResolution(true))
+	if !assert.Error(t, err, "Resolve(%s) recursive should cause ErrReferenceLoop", "#/foo") {
+		return
+	}
+
+	// Non-Recursive resolution should not report an error.
+	_, err = res.Resolve(obj1, "#/foo")
+	if !assert.NoError(t, err, "Resolve(%s) non-recursive should succeed", "#/foo") {
+		return
+	}
+}
