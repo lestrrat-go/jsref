@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 
 	"github.com/lestrrat-go/jsref/v2"
 )
@@ -35,13 +36,22 @@ func Example() {
 	}
 
 	r := jsref.New(data)
-	r.AddResolver(jsref.NewDynamicResolver())
+	r.AddResolver(jsref.NewHTTPResolver())
+	
+	// Create fs resolver that can handle the temp file's directory
+	tmpDir := filepath.Dir(f.Name())
+	fsResolver, err := jsref.NewFSResolver(tmpDir)
+	if err != nil {
+		fmt.Printf("failed to create fs resolver: %s\n", err)
+		return
+	}
+	r.AddResolver(fsResolver)
 
 	for _, ref := range []string{
 		// Local reference to the nested message
 		"#/deep/nested/message",
 		// File reference to the message in the temporary file
-		fmt.Sprintf("file://%s#/deep/nested/message", f.Name()),
+		fmt.Sprintf("%s#/deep/nested/message", filepath.Base(f.Name())),
 		// Remote reference to the message served by the test server
 		fmt.Sprintf("%s#/message", s.URL),
 	} {
