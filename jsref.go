@@ -165,7 +165,7 @@ func (r *httpResolver) parseData(data []byte) (any, error) {
 
 // fsResolver resolves file-based references using os.Root
 type fsResolver struct {
-	root *os.Root
+	root    *os.Root
 	rootDir string
 }
 
@@ -181,7 +181,6 @@ func NewFSResolver(dir string) (Resolver, error) {
 	}
 	return &fsResolver{root: root, rootDir: dir}, nil
 }
-
 
 // Resolve resolves file references that may include fragments
 func (r *fsResolver) Resolve(dst any, reference string) error {
@@ -214,7 +213,7 @@ func (r *fsResolver) Resolve(dst any, reference string) error {
 				return fmt.Errorf("failed to resolve root directory: %w", err)
 			}
 		}
-		
+
 		// Check if the absolute path is within our root
 		relPath, err := filepath.Rel(rootDir, filePath)
 		if err != nil || strings.HasPrefix(relPath, "..") {
@@ -236,8 +235,8 @@ func (r *fsResolver) Resolve(dst any, reference string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open file %s: %w", filePath, err)
 	}
-	defer file.Close()
-	
+	defer func() { _ = file.Close() }()
+
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return fmt.Errorf("failed to read file %s: %w", filePath, err)
@@ -274,7 +273,6 @@ func (r *fsResolver) Resolve(dst any, reference string) error {
 	// Resolve with the fragment (which should start with #)
 	return objectResolver.Resolve(dst, "#"+fragment)
 }
-
 
 // parseReference separates URI and fragment parts
 func parseReference(ref string) (uri, fragment string) {
