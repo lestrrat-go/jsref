@@ -28,7 +28,7 @@ func Example() {
 		fmt.Printf("failed to create temp file: %s\n", err)
 		return
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if err := json.NewEncoder(f).Encode(data); err != nil {
 		fmt.Printf("failed to write data to temp file: %s\n", err)
 		return
@@ -64,7 +64,7 @@ func startServer() (*httptest.Server, func()) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Handle the request here
 		w.WriteHeader(200)
-		w.Write([]byte(`{"message": "hello, world"}`))
+		_, _ = w.Write([]byte(`{"message": "hello, world"}`))
 	}))
 
 	return s, s.Close

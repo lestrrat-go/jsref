@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lestrrat-go/jsptr"
 	"github.com/goccy/go-yaml"
+	"github.com/lestrrat-go/jsptr"
 )
 
 // Resolver is the main interface for resolving JSON references
@@ -68,7 +68,7 @@ func (r *localResolver) Resolve(dst any, reference string) error {
 	if !strings.HasPrefix(reference, "#") {
 		return fmt.Errorf("local references must start with '#', got: %s", reference)
 	}
-	
+
 	// Remove the "#" prefix to get the JSON pointer
 	pointer := reference[1:]
 	ptr, err := jsptr.New(pointer)
@@ -96,7 +96,7 @@ func (r *dynamicResolver) Resolve(dst any, reference string) error {
 
 	// Parse the reference to separate URI and fragment
 	uri, fragment := parseReference(reference)
-	
+
 	// Fetch the resource
 	data, err := r.fetchResource(uri)
 	if err != nil {
@@ -105,13 +105,13 @@ func (r *dynamicResolver) Resolve(dst any, reference string) error {
 
 	// Create a local resolver for the fetched data
 	localResolver := NewLocalResolver(data)
-	
+
 	// External references must have a fragment (starting with #)
 	if fragment == "" {
 		// No fragment means return the whole document
 		return localResolver.Resolve(dst, "#") // Empty pointer means root
 	}
-	
+
 	// Resolve with the fragment (which should start with #)
 	return localResolver.Resolve(dst, "#"+fragment)
 }
@@ -125,7 +125,7 @@ func (r *dynamicResolver) fetchResource(uri string) (any, error) {
 	}
 
 	var data []byte
-	
+
 	// Handle different schemes
 	switch u.Scheme {
 	case "http", "https":
@@ -140,7 +140,7 @@ func (r *dynamicResolver) fetchResource(uri string) (any, error) {
 	default:
 		return nil, fmt.Errorf("unsupported URI scheme: %s", u.Scheme)
 	}
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (r *dynamicResolver) fetchResource(uri string) (any, error) {
 			return nil, fmt.Errorf("failed to parse as JSON or YAML: %w", err)
 		}
 	}
-	
+
 	return parsed, nil
 }
 
@@ -163,7 +163,7 @@ func (r *dynamicResolver) fetchHTTP(uri string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch %s: %w", uri, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
@@ -249,8 +249,6 @@ func (r *uriResolver) Resolve(dst any, reference string) error {
 	localResolver := NewLocalResolver(data)
 	return localResolver.Resolve(dst, reference)
 }
-
-
 
 // parseReference separates URI and fragment parts
 func parseReference(ref string) (uri, fragment string) {
