@@ -2,5 +2,5 @@
 
 This module provides ways to handle JSON References gracefully.
 
-<!-- INCLUDE(./jsref_exampl_test.go) -->
+<!-- INCLUDE(./jsref_example_test.go) -->
 <!-- END INCLUDE -->
