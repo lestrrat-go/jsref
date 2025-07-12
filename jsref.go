@@ -1,7 +1,6 @@
 package jsref
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,27 +10,39 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lestrrat-go/jsptr"
 	"github.com/goccy/go-yaml"
+	"github.com/lestrrat-go/jsptr"
 )
 
 // Resolver is the main interface for resolving JSON references
 type Resolver interface {
-	Resolve(ctx context.Context, dst any, reference string) error
+	Resolve(dst any, reference string) error
 }
 
-// contextKey is used for storing resolvers in context
-type contextKey struct{}
-
-// WithResolver stores a resolver in the context
-func WithResolver(ctx context.Context, resolver Resolver) context.Context {
-	return context.WithValue(ctx, contextKey{}, resolver)
+// StackedResolver combines multiple resolvers and tries them in order
+type StackedResolver struct {
+	resolvers []Resolver
 }
 
-// FromContext retrieves a resolver from the context
-func FromContext(ctx context.Context) (Resolver, bool) {
-	resolver, ok := ctx.Value(contextKey{}).(Resolver)
-	return resolver, ok
+// AddResolver adds a resolver to the stack
+func (r *StackedResolver) AddResolver(resolver Resolver) {
+	r.resolvers = append(r.resolvers, resolver)
+}
+
+// Resolve tries each resolver in order until one succeeds
+func (r *StackedResolver) Resolve(dst any, reference string) error {
+	var lastErr error
+	for _, resolver := range r.resolvers {
+		err := resolver.Resolve(dst, reference)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return fmt.Errorf("all resolvers failed, last error: %w", lastErr)
+	}
+	return fmt.Errorf("no resolvers available")
 }
 
 // localResolver resolves pointers against a single static object
@@ -39,18 +50,25 @@ type localResolver struct {
 	object any
 }
 
-// New creates a new localResolver for the given object
-func New(object any) Resolver {
+// New creates a new StackedResolver with a local resolver for the given object
+func New(object any) *StackedResolver {
+	stacked := &StackedResolver{resolvers: make([]Resolver, 0)}
+	stacked.AddResolver(&localResolver{object: object})
+	return stacked
+}
+
+// NewLocalResolver creates a new localResolver for the given object
+func NewLocalResolver(object any) Resolver {
 	return &localResolver{object: object}
 }
 
 // Resolve resolves a reference against the local object
-func (r *localResolver) Resolve(ctx context.Context, dst any, reference string) error {
+func (r *localResolver) Resolve(dst any, reference string) error {
 	// Local references must start with "#"
 	if !strings.HasPrefix(reference, "#") {
 		return fmt.Errorf("local references must start with '#', got: %s", reference)
 	}
-	
+
 	// Remove the "#" prefix to get the JSON pointer
 	pointer := reference[1:]
 	ptr, err := jsptr.New(pointer)
@@ -69,47 +87,37 @@ func NewDynamicResolver() Resolver {
 }
 
 // Resolve resolves a reference string that may reference external resources
-func (r *dynamicResolver) Resolve(ctx context.Context, dst any, reference string) error {
+func (r *dynamicResolver) Resolve(dst any, reference string) error {
 	// Check if this is a local reference only (starts with #)
 	if strings.HasPrefix(reference, "#") {
-		// Try to get a resolver from context for local references
-		if resolver, ok := FromContext(ctx); ok {
-			return resolver.Resolve(ctx, dst, reference)
-		}
-		return fmt.Errorf("local reference requires a resolver in context")
+		// Dynamic resolver cannot handle local-only references
+		return fmt.Errorf("dynamic resolver cannot handle local reference: %s", reference)
 	}
 
 	// Parse the reference to separate URI and fragment
 	uri, fragment := parseReference(reference)
-	
-	// External references must have a fragment (starting with #)
-	if fragment == "" {
-		// No fragment means return the whole document
-		data, err := r.fetchResource(ctx, uri)
-		if err != nil {
-			return fmt.Errorf("failed to fetch resource %s: %w", uri, err)
-		}
-		
-		// Create a local resolver for the fetched data
-		localResolver := New(data)
-		return localResolver.Resolve(ctx, dst, "#") // Empty pointer means root
-	}
-	
+
 	// Fetch the resource
-	data, err := r.fetchResource(ctx, uri)
+	data, err := r.fetchResource(uri)
 	if err != nil {
 		return fmt.Errorf("failed to fetch resource %s: %w", uri, err)
 	}
 
 	// Create a local resolver for the fetched data
-	localResolver := New(data)
-	
+	localResolver := NewLocalResolver(data)
+
+	// External references must have a fragment (starting with #)
+	if fragment == "" {
+		// No fragment means return the whole document
+		return localResolver.Resolve(dst, "#") // Empty pointer means root
+	}
+
 	// Resolve with the fragment (which should start with #)
-	return localResolver.Resolve(ctx, dst, "#"+fragment)
+	return localResolver.Resolve(dst, "#"+fragment)
 }
 
 // fetchResource fetches content from various sources
-func (r *dynamicResolver) fetchResource(ctx context.Context, uri string) (any, error) {
+func (r *dynamicResolver) fetchResource(uri string) (any, error) {
 	// Parse the URI
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -117,11 +125,11 @@ func (r *dynamicResolver) fetchResource(ctx context.Context, uri string) (any, e
 	}
 
 	var data []byte
-	
+
 	// Handle different schemes
 	switch u.Scheme {
 	case "http", "https":
-		data, err = r.fetchHTTP(ctx, uri)
+		data, err = r.fetchHTTP(uri)
 	case "file", "":
 		// Handle file:// URLs and relative paths
 		path := u.Path
@@ -132,7 +140,7 @@ func (r *dynamicResolver) fetchResource(ctx context.Context, uri string) (any, e
 	default:
 		return nil, fmt.Errorf("unsupported URI scheme: %s", u.Scheme)
 	}
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -145,23 +153,17 @@ func (r *dynamicResolver) fetchResource(ctx context.Context, uri string) (any, e
 			return nil, fmt.Errorf("failed to parse as JSON or YAML: %w", err)
 		}
 	}
-	
+
 	return parsed, nil
 }
 
 // fetchHTTP fetches content via HTTP
-func (r *dynamicResolver) fetchHTTP(ctx context.Context, uri string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", uri, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
+func (r *dynamicResolver) fetchHTTP(uri string) ([]byte, error) {
+	resp, err := http.Get(uri)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch %s: %w", uri, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
@@ -195,7 +197,7 @@ func NewFileResolver(path string) Resolver {
 }
 
 // Resolve resolves a reference against the static file
-func (r *fileResolver) Resolve(ctx context.Context, dst any, reference string) error {
+func (r *fileResolver) Resolve(dst any, reference string) error {
 	// For file resolver, the reference should be a local reference starting with #
 	data, err := os.ReadFile(r.path)
 	if err != nil {
@@ -221,8 +223,8 @@ func (r *fileResolver) Resolve(ctx context.Context, dst any, reference string) e
 		}
 	}
 
-	localResolver := New(parsed)
-	return localResolver.Resolve(ctx, dst, reference)
+	localResolver := NewLocalResolver(parsed)
+	return localResolver.Resolve(dst, reference)
 }
 
 // uriResolver resolves references to static URIs
@@ -236,49 +238,17 @@ func NewURIResolver(uri string) Resolver {
 }
 
 // Resolve resolves a reference against the static URI
-func (r *uriResolver) Resolve(ctx context.Context, dst any, reference string) error {
+func (r *uriResolver) Resolve(dst any, reference string) error {
 	// For URI resolver, the reference should be a local reference starting with #
 	dynamicRes := &dynamicResolver{}
-	data, err := dynamicRes.fetchResource(ctx, r.uri)
+	data, err := dynamicRes.fetchResource(r.uri)
 	if err != nil {
 		return fmt.Errorf("failed to fetch URI %s: %w", r.uri, err)
 	}
 
-	localResolver := New(data)
-	return localResolver.Resolve(ctx, dst, reference)
+	localResolver := NewLocalResolver(data)
+	return localResolver.Resolve(dst, reference)
 }
-
-// stackedResolver combines multiple resolvers
-type stackedResolver struct {
-	resolvers []Resolver
-}
-
-// NewStackedResolver creates a new stackedResolver
-func NewStackedResolver() *stackedResolver {
-	return &stackedResolver{resolvers: make([]Resolver, 0)}
-}
-
-// AddResolver adds a resolver to the stack
-func (r *stackedResolver) AddResolver(resolver Resolver) {
-	r.resolvers = append(r.resolvers, resolver)
-}
-
-// Resolve tries each resolver in order until one succeeds
-func (r *stackedResolver) Resolve(ctx context.Context, dst any, reference string) error {
-	var lastErr error
-	for _, resolver := range r.resolvers {
-		err := resolver.Resolve(ctx, dst, reference)
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-	}
-	if lastErr != nil {
-		return fmt.Errorf("all resolvers failed, last error: %w", lastErr)
-	}
-	return fmt.Errorf("no resolvers available")
-}
-
 
 // parseReference separates URI and fragment parts
 func parseReference(ref string) (uri, fragment string) {

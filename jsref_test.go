@@ -1,7 +1,6 @@
 package jsref_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,46 +23,45 @@ func TestLocalResolver(t *testing.T) {
 		"hobbies": []any{"reading", "coding", "hiking"},
 	}
 
-	ctx := context.Background()
 	resolver := jsref.New(data)
 
 	t.Run("resolve root", func(t *testing.T) {
 		var result map[string]any
-		err := resolver.Resolve(ctx, &result, "#")
+		err := resolver.Resolve(&result, "#")
 		require.NoError(t, err)
 		require.Equal(t, data, result)
 	})
 
 	t.Run("resolve name", func(t *testing.T) {
 		var result string
-		err := resolver.Resolve(ctx, &result, "#/name")
+		err := resolver.Resolve(&result, "#/name")
 		require.NoError(t, err)
 		require.Equal(t, "John Doe", result)
 	})
 
 	t.Run("resolve nested address", func(t *testing.T) {
 		var result string
-		err := resolver.Resolve(ctx, &result, "#/address/city")
+		err := resolver.Resolve(&result, "#/address/city")
 		require.NoError(t, err)
 		require.Equal(t, "New York", result)
 	})
 
 	t.Run("resolve array element", func(t *testing.T) {
 		var result string
-		err := resolver.Resolve(ctx, &result, "#/hobbies/1")
+		err := resolver.Resolve(&result, "#/hobbies/1")
 		require.NoError(t, err)
 		require.Equal(t, "coding", result)
 	})
 
 	t.Run("resolve nonexistent property", func(t *testing.T) {
 		var result any
-		err := resolver.Resolve(ctx, &result, "#/nonexistent")
+		err := resolver.Resolve(&result, "#/nonexistent")
 		require.Error(t, err)
 	})
 
 	t.Run("reject reference without hash prefix", func(t *testing.T) {
 		var result any
-		err := resolver.Resolve(ctx, &result, "/name")
+		err := resolver.Resolve(&result, "/name")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "local references must start with '#'")
 	})
@@ -88,19 +86,18 @@ func TestFileResolver(t *testing.T) {
 	err = os.WriteFile(jsonFile, jsonData, 0644)
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	resolver := jsref.NewFileResolver(jsonFile)
 
 	t.Run("resolve from JSON file", func(t *testing.T) {
 		var result string
-		err := resolver.Resolve(ctx, &result, "#/database/host")
+		err := resolver.Resolve(&result, "#/database/host")
 		require.NoError(t, err)
 		require.Equal(t, "localhost", result)
 	})
 
 	t.Run("resolve array from JSON file", func(t *testing.T) {
 		var result string
-		err := resolver.Resolve(ctx, &result, "#/features/0")
+		err := resolver.Resolve(&result, "#/features/0")
 		require.NoError(t, err)
 		require.Equal(t, "auth", result)
 	})
@@ -126,30 +123,27 @@ func TestStackedResolver(t *testing.T) {
 	err = os.WriteFile(jsonFile, jsonData, 0644)
 	require.NoError(t, err)
 
-	ctx := context.Background()
-
-	// Create stacked resolver
-	stacked := jsref.NewStackedResolver()
-	stacked.AddResolver(jsref.New(localData))
+	// Create stacked resolver using New() which now returns *StackedResolver
+	stacked := jsref.New(localData)
 	stacked.AddResolver(jsref.NewFileResolver(jsonFile))
 
 	t.Run("resolve from first resolver", func(t *testing.T) {
 		var result string
-		err := stacked.Resolve(ctx, &result, "#/local")
+		err := stacked.Resolve(&result, "#/local")
 		require.NoError(t, err)
 		require.Equal(t, "value", result)
 	})
 
 	t.Run("resolve from second resolver when first fails", func(t *testing.T) {
 		var result string
-		err := stacked.Resolve(ctx, &result, "#/external")
+		err := stacked.Resolve(&result, "#/external")
 		require.NoError(t, err)
 		require.Equal(t, "file-value", result)
 	})
 
 	t.Run("fail when no resolver can handle", func(t *testing.T) {
 		var result any
-		err := stacked.Resolve(ctx, &result, "#/nonexistent")
+		err := stacked.Resolve(&result, "#/nonexistent")
 		require.Error(t, err)
 	})
 }
@@ -176,12 +170,11 @@ func TestDynamicResolver(t *testing.T) {
 	err = os.WriteFile(jsonFile, jsonData, 0644)
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	resolver := jsref.NewDynamicResolver()
 
 	t.Run("resolve from file without fragment", func(t *testing.T) {
 		var result map[string]any
-		err = resolver.Resolve(ctx, &result, jsonFile)
+		err := resolver.Resolve(&result, jsonFile)
 		require.NoError(t, err)
 		require.Equal(t, data, result)
 	})
@@ -189,7 +182,7 @@ func TestDynamicResolver(t *testing.T) {
 	t.Run("resolve from file with fragment", func(t *testing.T) {
 		reference := fmt.Sprintf("%s#/config/timeout", jsonFile)
 		var result float64
-		err = resolver.Resolve(ctx, &result, reference)
+		err := resolver.Resolve(&result, reference)
 		require.NoError(t, err)
 		require.Equal(t, float64(30), result)
 	})
@@ -197,46 +190,58 @@ func TestDynamicResolver(t *testing.T) {
 	t.Run("resolve array element with fragment", func(t *testing.T) {
 		reference := fmt.Sprintf("%s#/endpoints/1", jsonFile)
 		var result string
-		err = resolver.Resolve(ctx, &result, reference)
+		err := resolver.Resolve(&result, reference)
 		require.NoError(t, err)
 		require.Equal(t, "https://api.example.com/v2", result)
 	})
 
-	t.Run("resolve local reference with context", func(t *testing.T) {
-		// Set up context with a resolver
-		localResolver := jsref.New(data)
-		ctxWithResolver := jsref.WithResolver(ctx, localResolver)
-
-		var result any // Use any instead of float64 to handle type conversion
-		err := resolver.Resolve(ctxWithResolver, &result, "#/config/retries")
-		require.NoError(t, err)
-		require.Equal(t, float64(3), result)
-	})
-
-	t.Run("fail local reference without context", func(t *testing.T) {
+	t.Run("local reference fails in dynamic resolver", func(t *testing.T) {
 		var result any
-		err := resolver.Resolve(ctx, &result, "#/config/timeout")
+		err := resolver.Resolve(&result, "#/config/timeout")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "local reference requires a resolver in context")
+		require.Contains(t, err.Error(), "dynamic resolver cannot handle local reference")
 	})
 }
 
-func TestContextFunctions(t *testing.T) {
-	data := map[string]any{"test": "value"}
-	resolver := jsref.New(data)
+func TestStackedResolverWithLocalAndDynamic(t *testing.T) {
+	// Create test data for local resolver
+	localData := map[string]any{
+		"local": "local-value",
+		"config": map[string]any{
+			"retries": float64(3),
+		},
+	}
 
-	ctx := context.Background()
+	// Create temporary file
+	tmpDir := t.TempDir()
+	jsonFile := filepath.Join(tmpDir, "dynamic.json")
 
-	t.Run("resolver not in context", func(t *testing.T) {
-		_, exists := jsref.FromContext(ctx)
-		require.False(t, exists)
+	fileData := map[string]any{
+		"external": "external-value",
+	}
+
+	jsonData, err := json.Marshal(fileData)
+	require.NoError(t, err)
+
+	err = os.WriteFile(jsonFile, jsonData, 0644)
+	require.NoError(t, err)
+
+	// Create stacked resolver with local data and dynamic resolver
+	stacked := jsref.New(localData)
+	stacked.AddResolver(jsref.NewDynamicResolver())
+
+	t.Run("resolve local reference", func(t *testing.T) {
+		var result string
+		err := stacked.Resolve(&result, "#/local")
+		require.NoError(t, err)
+		require.Equal(t, "local-value", result)
 	})
 
-	t.Run("resolver in context", func(t *testing.T) {
-		ctxWithResolver := jsref.WithResolver(ctx, resolver)
-		retrievedResolver, exists := jsref.FromContext(ctxWithResolver)
-		require.True(t, exists)
-		require.Equal(t, resolver, retrievedResolver)
+	t.Run("resolve external file reference", func(t *testing.T) {
+		var result string
+		err := stacked.Resolve(&result, jsonFile+"#/external")
+		require.NoError(t, err)
+		require.Equal(t, "external-value", result)
 	})
 }
 
@@ -261,13 +266,12 @@ services:
 	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
 	require.NoError(t, err)
 
-	ctx := context.Background()
 	resolver := jsref.NewDynamicResolver()
 
 	t.Run("resolve from YAML file", func(t *testing.T) {
 		reference := fmt.Sprintf("%s#/database/host", yamlFile)
 		var result string
-		err = resolver.Resolve(ctx, &result, reference)
+		err := resolver.Resolve(&result, reference)
 		require.NoError(t, err)
 		require.Equal(t, "localhost", result)
 	})
@@ -275,7 +279,7 @@ services:
 	t.Run("resolve boolean from YAML", func(t *testing.T) {
 		reference := fmt.Sprintf("%s#/database/ssl", yamlFile)
 		var result bool
-		err = resolver.Resolve(ctx, &result, reference)
+		err := resolver.Resolve(&result, reference)
 		require.NoError(t, err)
 		require.True(t, result)
 	})
@@ -283,13 +287,12 @@ services:
 	t.Run("resolve array element from YAML", func(t *testing.T) {
 		reference := fmt.Sprintf("%s#/services/1/name", yamlFile)
 		var result string
-		err = resolver.Resolve(ctx, &result, reference)
+		err := resolver.Resolve(&result, reference)
 		require.NoError(t, err)
 		require.Equal(t, "api", result)
 	})
 }
 
-// TestSpecificationExamples tests the exact examples from the specification
 func TestSpecificationExamples(t *testing.T) {
 	// Create test files as per spec examples
 	tmpDir := t.TempDir()
@@ -320,8 +323,6 @@ json:
 	err = os.WriteFile(yamlFile, []byte(yamlContent), 0644)
 	require.NoError(t, err)
 
-	ctx := context.Background()
-
 	t.Run("local resolver with hash prefix", func(t *testing.T) {
 		object := map[string]any{
 			"name": "test",
@@ -333,12 +334,12 @@ json:
 		r := jsref.New(object)
 
 		var result string
-		err := r.Resolve(ctx, &result, "#/name")
+		err := r.Resolve(&result, "#/name")
 		require.NoError(t, err)
 		require.Equal(t, "test", result)
 
 		var result2 any
-		err = r.Resolve(ctx, &result2, "#/data/value")
+		err = r.Resolve(&result2, "#/data/value")
 		require.NoError(t, err)
 		require.Equal(t, 42, result2)
 	})
@@ -346,21 +347,21 @@ json:
 	t.Run("dynamic resolver examples from spec", func(t *testing.T) {
 		r := jsref.NewDynamicResolver()
 
-		// r.Resolve(ctx, dst, "./path/to/object.json")
+		// r.Resolve(dst, "./path/to/object.json")
 		var result1 map[string]any
-		err := r.Resolve(ctx, &result1, jsonFile)
+		err := r.Resolve(&result1, jsonFile)
 		require.NoError(t, err)
 		require.Equal(t, jsonData, result1)
 
-		// r.Resolve(ctx, dst, "./path/to/object.yaml#/json/ptr")
+		// r.Resolve(dst, "./path/to/object.yaml#/json/ptr")
 		var result2 string
-		err = r.Resolve(ctx, &result2, yamlFile+"#/json/ptr")
+		err = r.Resolve(&result2, yamlFile+"#/json/ptr")
 		require.NoError(t, err)
 		require.Equal(t, "yaml-pointer-value", result2)
 
 		// Test without fragment returns whole document
 		var result3 map[string]any
-		err = r.Resolve(ctx, &result3, yamlFile)
+		err = r.Resolve(&result3, yamlFile)
 		require.NoError(t, err)
 		require.Contains(t, result3, "hello")
 		require.Contains(t, result3, "json")
@@ -370,29 +371,30 @@ json:
 		r := jsref.NewFileResolver(jsonFile)
 
 		var result string
-		err := r.Resolve(ctx, &result, "#/hello/world")
+		err := r.Resolve(&result, "#/hello/world")
 		require.NoError(t, err)
 		require.Equal(t, "test-value", result)
 	})
 
-	t.Run("stacked resolver with context", func(t *testing.T) {
+	t.Run("stacked resolver", func(t *testing.T) {
 		localData := map[string]any{
 			"local": "local-value",
 		}
 
-		stackedResolver := jsref.NewStackedResolver()
-		stackedResolver.AddResolver(jsref.NewFileResolver(jsonFile))
-		stackedResolver.AddResolver(jsref.NewDynamicResolver())
+		stacked := jsref.New(localData)
+		stacked.AddResolver(jsref.NewFileResolver(jsonFile))
+		stacked.AddResolver(jsref.NewDynamicResolver())
 
-		// Use context to pass stacked resolver for local references
-		ctxWithResolver := jsref.WithResolver(ctx, stackedResolver)
-		r := jsref.New(localData)
-
-		// Resolve local reference using context resolver
+		// Resolve local reference
 		var result string
-		err := r.Resolve(ctxWithResolver, &result, "#/local")
+		err := stacked.Resolve(&result, "#/local")
 		require.NoError(t, err)
 		require.Equal(t, "local-value", result)
+
+		// Resolve file reference
+		err = stacked.Resolve(&result, "#/hello/world")
+		require.NoError(t, err)
+		require.Equal(t, "test-value", result)
 	})
 
 	t.Run("error cases", func(t *testing.T) {
@@ -400,14 +402,14 @@ json:
 
 		// Local reference without hash should fail
 		var result any
-		err := r.Resolve(ctx, &result, "/test")
+		err := r.Resolve(&result, "/test")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "local references must start with '#'")
 
-		// Dynamic resolver with local reference but no context should fail
+		// Dynamic resolver with local reference should fail
 		dr := jsref.NewDynamicResolver()
-		err = dr.Resolve(ctx, &result, "#/test")
+		err = dr.Resolve(&result, "#/test")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "local reference requires a resolver in context")
+		require.Contains(t, err.Error(), "dynamic resolver cannot handle local reference")
 	})
 }
