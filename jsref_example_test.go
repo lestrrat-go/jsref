@@ -35,7 +35,7 @@ func Example() {
 		return
 	}
 
-	r := jsref.New(data)
+	r := jsref.New()
 	r.AddResolver(jsref.NewHTTPResolver())
 	
 	// Create fs resolver that can handle the temp file's directory
@@ -47,22 +47,28 @@ func Example() {
 	}
 	r.AddResolver(fsResolver)
 
-	for _, ref := range []string{
-		// Local reference to the nested message
-		"#/deep/nested/message",
+	testCases := []struct{
+		resource any
+		localRef string
+		expected string
+	}{
+		// Local reference to the nested message using objectResolver fallback
+		{data, "#/deep/nested/message", "hello, world"},
 		// File reference to the message in the temporary file
-		fmt.Sprintf("%s#/deep/nested/message", filepath.Base(f.Name())),
+		{filepath.Base(f.Name()), "#/deep/nested/message", "hello, world"},
 		// Remote reference to the message served by the test server
-		fmt.Sprintf("%s#/message", s.URL),
-	} {
+		{s.URL, "#/message", "hello, world"},
+	}
+	
+	for _, tc := range testCases {
 		var dst string
-		if err := r.Resolve(&dst, ref); err != nil {
-			fmt.Printf("failed to resolve reference %s: %s\n", ref, err)
+		if err := r.Resolve(&dst, tc.resource, tc.localRef); err != nil {
+			fmt.Printf("failed to resolve reference: %s\n", err)
 			return
 		}
 
-		if dst != "hello, world" {
-			fmt.Printf("expected 'hello, world', got '%s'\n", dst)
+		if dst != tc.expected {
+			fmt.Printf("expected '%s', got '%s'\n", tc.expected, dst)
 			return
 		}
 	}
