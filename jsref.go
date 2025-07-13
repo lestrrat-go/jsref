@@ -133,7 +133,11 @@ func (r *StackedResolver) CanResolve(resource any) bool {
 	return true
 }
 
-// Resolve tries each resolver in order until one succeeds, with objectResolver as last resort
+// Resolve tries each resolver in order until one succeeds, with objectResolver as last resort.
+// This function follows the standard Resolver interface - it uses the resource parameter as-is
+// and expects localRef to be a local reference starting with "#".
+// Individual Resolvers may return errors if the resource parameter type doesn't match their expectations.
+// For convenience features like full reference parsing, use the global jsref.Resolve() function instead.
 func (r *StackedResolver) Resolve(dst any, resource any, localRef string) error {
 	var allErrors []error
 
@@ -384,18 +388,36 @@ func init() {
 	}
 }
 
-// Resolve is a global function that uses a stock StackedResolver
-// It handles the most common case of resolving JSON references
-func Resolve(dst any, reference string) error {
-	external, local, err := Split(reference)
+// Resolve is a global convenience function that uses a stock StackedResolver.
+// 
+// This function has the same signature as other Resolvers but with enhanced behavior:
+// - If localRef contains a full reference (e.g., "https://example.com/data.json#/path"),
+//   it uses Split() to parse it and passes the correct values to the underlying StackedResolver,
+//   ignoring the resource parameter entirely to avoid type mismatches with specific Resolvers
+// - If localRef is a pure local reference (e.g., "#/path"), it uses the resource parameter normally
+//
+// Examples:
+//   jsref.Resolve(&dst, data, "#/path")                              // uses data as resource
+//   jsref.Resolve(&dst, data, "/file.json#/path")                    // ignores data, uses "/file.json"
+//   jsref.Resolve(&dst, nil, "https://example.com/data.json#/path")  // uses external URL
+//
+// This differs from StackedResolver.Resolve() which always uses the resource parameter as-is
+// and may return errors if the resource type doesn't match what a specific Resolver expects.
+func Resolve(dst any, resource any, localRef string) error {
+	// Try to split the localRef to see if it contains a full reference
+	external, local, err := Split(localRef)
 	if err != nil {
 		return fmt.Errorf("failed to split reference: %w", err)
 	}
-
-	// If it's a pure local reference, use empty resource (will fallback to objectResolver)
-	if external == "" {
-		return fmt.Errorf("global resolver cannot handle pure local references")
+	
+	// If there's an external part, ignore the resource parameter and use the external part
+	if external != "" {
+		return globalResolver.Resolve(dst, external, local)
 	}
-
-	return globalResolver.Resolve(dst, external, local)
+	
+	// No external part, use normal resolver behavior with provided resource
+	if resource == nil {
+		return fmt.Errorf("cannot resolve pure local reference without a resource")
+	}
+	return globalResolver.Resolve(dst, resource, localRef)
 }
