@@ -12,7 +12,6 @@ import (
   "net/http"
   "net/http/httptest"
   "os"
-  "path/filepath"
 
   "github.com/lestrrat-go/jsref/v2"
 )
@@ -41,34 +40,38 @@ func Example() {
     return
   }
 
-  r := jsref.New(data)
-  r.AddResolver(jsref.NewHTTPResolver())
-  
-  // Create fs resolver that can handle the temp file's directory
-  tmpDir := filepath.Dir(f.Name())
-  fsResolver, err := jsref.NewFSResolver(tmpDir)
-  if err != nil {
-    fmt.Printf("failed to create fs resolver: %s\n", err)
-    return
-  }
-  r.AddResolver(fsResolver)
-
-  for _, ref := range []string{
-    // Local reference to the nested message
-    "#/deep/nested/message",
+  // Use the global jsref.Resolve function - it handles HTTP, file, and local references automatically
+  testCases := []struct {
+    name     string
+    resource any
+    localRef string
+    expected string
+  }{
+    // Local reference to the message in the data structure
+    {"local data", data, "#/deep/nested/message", "hello, world"},
     // File reference to the message in the temporary file
-    fmt.Sprintf("%s#/deep/nested/message", filepath.Base(f.Name())),
+    {"file resource", f.Name(), "#/deep/nested/message", "hello, world"},
     // Remote reference to the message served by the test server
-    fmt.Sprintf("%s#/message", s.URL),
-  } {
+    {"http resource", s.URL, "#/message", "hello, world"},
+    // Full reference with nil resource (convenience mode)
+    {"full file reference with nil", nil, f.Name() + "#/deep/nested/message", "hello, world"},
+    // Full HTTP reference with nil resource (convenience mode)
+    {"full http reference with nil", nil, s.URL + "#/message", "hello, world"},
+    // Full reference with non-nil resource (resource gets ignored)
+    {"full file reference ignores resource", data, f.Name() + "#/deep/nested/message", "hello, world"},
+    // Full HTTP reference with non-nil resource (resource gets ignored)
+    {"full http reference ignores resource", data, s.URL + "#/message", "hello, world"},
+  }
+
+  for _, tc := range testCases {
     var dst string
-    if err := r.Resolve(&dst, ref); err != nil {
-      fmt.Printf("failed to resolve reference %s: %s\n", ref, err)
+    if err := jsref.Resolve(&dst, tc.resource, tc.localRef); err != nil {
+      fmt.Printf("failed to resolve %s: %s\n", tc.name, err)
       return
     }
 
-    if dst != "hello, world" {
-      fmt.Printf("expected 'hello, world', got '%s'\n", dst)
+    if dst != tc.expected {
+      fmt.Printf("expected '%s', got '%s' for %s\n", tc.expected, dst, tc.name)
       return
     }
   }
