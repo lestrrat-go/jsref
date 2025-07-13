@@ -15,9 +15,15 @@ import (
 	"github.com/lestrrat-go/jsptr"
 )
 
-// Resolver is the main interface for resolving JSON references
+// Resolver is the main interface for resolving JSON references.
 type Resolver interface {
+	// CanResolve returns true if this resolver can handle the given resource type
 	CanResolve(resource any) bool
+	
+	// Resolve resolves a JSON reference against a resource.
+	// The standard behavior is to use the resource parameter as-is and expect
+	// localRef to be a local reference starting with "#" (e.g., "#/path/to/data").
+	// Implementations may return an error if the resource type is incompatible.
 	Resolve(dst any, resource any, localRef string) error
 }
 
@@ -133,11 +139,17 @@ func (r *StackedResolver) CanResolve(resource any) bool {
 	return true
 }
 
-// Resolve tries each resolver in order until one succeeds, with objectResolver as last resort.
-// This function follows the standard Resolver interface - it uses the resource parameter as-is
-// and expects localRef to be a local reference starting with "#".
-// Individual Resolvers may return errors if the resource parameter type doesn't match their expectations.
-// For convenience features like full reference parsing, use the global jsref.Resolve() function instead.
+// Resolve resolves a JSON reference by trying each added resolver in order until one succeeds,
+// with a built-in object resolver as the final fallback.
+//
+// This method follows the standard Resolver interface behavior:
+// - Uses the resource parameter as-is without modification
+// - Expects localRef to be a local reference starting with "#" (e.g., "#/path/to/data")
+// - Individual resolvers may return errors if the resource type doesn't match their expectations
+//   (e.g., HTTP resolvers expect string URLs, file resolvers expect string paths)
+//
+// For convenience features like automatic full reference parsing
+// (e.g., "https://example.com/data.json#/path"), use the global jsref.Resolve() function instead.
 func (r *StackedResolver) Resolve(dst any, resource any, localRef string) error {
 	var allErrors []error
 
@@ -166,12 +178,16 @@ func (r *StackedResolver) Resolve(dst any, resource any, localRef string) error 
 // objectResolver resolves pointers against a single static object
 type objectResolver struct{}
 
-// New creates a new StackedResolver (empty, no default resolvers)
+// New creates a new StackedResolver (empty, no default resolvers).
+// Add specific resolvers using AddResolver() based on the resource types you need to handle.
 func New() *StackedResolver {
 	return &StackedResolver{resolvers: make([]Resolver, 0)}
 }
 
-// NewObjectResolver creates a new objectResolver
+// NewObjectResolver creates a new object resolver.
+// This resolver accepts any resource type and attempts JSON pointer resolution against it.
+// Use this resolver when your resource parameter in Resolve() will be data objects
+// (maps, structs, slices, etc.) that you want to navigate with JSON pointers.
 func NewObjectResolver() Resolver {
 	return objectResolver{}
 }
@@ -200,7 +216,10 @@ func (r objectResolver) Resolve(dst any, resource any, localRef string) error {
 // httpResolver resolves HTTP/HTTPS references
 type httpResolver struct{}
 
-// NewHTTPResolver creates a new httpResolver
+// NewHTTPResolver creates a new HTTP resolver.
+// This resolver expects string resources containing HTTP or HTTPS URLs.
+// Use this resolver when your resource parameter in Resolve() will be URL strings
+// like "https://example.com/data.json" that need to be fetched over HTTP.
 func NewHTTPResolver() Resolver {
 	return &httpResolver{}
 }
@@ -273,8 +292,13 @@ type fsResolver struct {
 	rootDir string
 }
 
-// NewFSResolver creates a new fsResolver with the given directory
-// If dir is empty, it defaults to the current directory
+// NewFSResolver creates a new filesystem resolver rooted at the given directory.
+// This resolver expects string resources containing file paths (relative to the root directory).
+// Use this resolver when your resource parameter in Resolve() will be file path strings
+// like "/path/to/data.json" or "config.yaml" that need to be loaded from the filesystem.
+//
+// If dir is empty, it defaults to the current directory.
+// The resolver will only access files within the specified root directory for security.
 func NewFSResolver(dir string) (Resolver, error) {
 	if dir == "" {
 		dir = "."
