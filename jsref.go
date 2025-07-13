@@ -2,6 +2,7 @@ package jsref
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,17 +26,17 @@ func Split(reference string) (external string, local string, err error) {
 	if reference == "" {
 		return "", "", fmt.Errorf("empty reference")
 	}
-	
+
 	// If it starts with #, it's a pure local reference
 	if strings.HasPrefix(reference, "#") {
 		return "", reference, nil
 	}
-	
+
 	// Find the # separator
 	if idx := strings.Index(reference, "#"); idx >= 0 {
 		return reference[:idx], reference[idx:], nil
 	}
-	
+
 	// No # found, it's a pure external reference
 	return reference, "", nil
 }
@@ -45,9 +46,9 @@ func parseData(data []byte) (any, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty data")
 	}
-	
+
 	var parsed any
-	
+
 	// Use heuristics to detect likely format
 	if isLikelyJSON(data) {
 		// Try JSON first if it looks like JSON
@@ -68,7 +69,7 @@ func parseData(data []byte) (any, error) {
 			return nil, fmt.Errorf("failed to parse as JSON or YAML: %w", err)
 		}
 	}
-	
+
 	return parsed, nil
 }
 
@@ -79,37 +80,36 @@ func isLikelyJSON(data []byte) bool {
 	if len(trimmed) == 0 {
 		return false
 	}
-	
+
 	// JSON objects/arrays start with { or [
 	firstChar := trimmed[0]
 	lastChar := trimmed[len(trimmed)-1]
-	
+
 	// Strong indicators of JSON
 	if (firstChar == '{' && lastChar == '}') || (firstChar == '[' && lastChar == ']') {
 		return true
 	}
-	
+
 	// Check for JSON strings, numbers, booleans, null
-	if firstChar == '"' || 
-	   strings.HasPrefix(trimmed, "true") || 
-	   strings.HasPrefix(trimmed, "false") || 
-	   strings.HasPrefix(trimmed, "null") ||
-	   (firstChar >= '0' && firstChar <= '9') || firstChar == '-' {
+	if firstChar == '"' ||
+		strings.HasPrefix(trimmed, "true") ||
+		strings.HasPrefix(trimmed, "false") ||
+		strings.HasPrefix(trimmed, "null") ||
+		(firstChar >= '0' && firstChar <= '9') || firstChar == '-' {
 		return true
 	}
-	
+
 	// YAML indicators that suggest it's NOT JSON
 	// YAML documents often start with --- or have : without quotes
-	if strings.HasPrefix(trimmed, "---") || 
-	   strings.Contains(trimmed, ":\n") || 
-	   strings.Contains(trimmed, ": ") && !strings.Contains(trimmed, "\": ") {
+	if strings.HasPrefix(trimmed, "---") ||
+		strings.Contains(trimmed, ":\n") ||
+		strings.Contains(trimmed, ": ") && !strings.Contains(trimmed, "\": ") {
 		return false
 	}
-	
+
 	// Default to JSON for ambiguous cases
 	return true
 }
-
 
 // StackedResolver combines multiple resolvers and tries them in order
 type StackedResolver struct {
@@ -135,8 +135,8 @@ func (r *StackedResolver) CanResolve(resource any) bool {
 
 // Resolve tries each resolver in order until one succeeds, with objectResolver as last resort
 func (r *StackedResolver) Resolve(dst any, resource any, localRef string) error {
-	var lastErr error
-	
+	var allErrors []error
+
 	// Try added resolvers first
 	for _, resolver := range r.resolvers {
 		if resolver.CanResolve(resource) {
@@ -144,22 +144,19 @@ func (r *StackedResolver) Resolve(dst any, resource any, localRef string) error 
 			if err == nil {
 				return nil
 			}
-			lastErr = err
+			allErrors = append(allErrors, err)
 		}
 	}
-	
+
 	// As last resort, try objectResolver
-	objResolver := &objectResolver{}
+	objResolver := objectResolver{}
 	err := objResolver.Resolve(dst, resource, localRef)
 	if err == nil {
 		return nil
 	}
-	lastErr = err
-	
-	if lastErr != nil {
-		return fmt.Errorf("all resolvers failed, last error: %w", lastErr)
-	}
-	return fmt.Errorf("no suitable resolver found for resource type %T", resource)
+	allErrors = append(allErrors, err)
+
+	return fmt.Errorf("no suitable resolver found for resource type %T. list of errors during resolution process: %w", resource, errors.Join(allErrors...))
 }
 
 // objectResolver resolves pointers against a single static object
@@ -172,16 +169,16 @@ func New() *StackedResolver {
 
 // NewObjectResolver creates a new objectResolver
 func NewObjectResolver() Resolver {
-	return &objectResolver{}
+	return objectResolver{}
 }
 
 // CanResolve always returns true - objectResolver attempts to resolve against any resource
-func (r *objectResolver) CanResolve(resource any) bool {
+func (r objectResolver) CanResolve(resource any) bool {
 	return true
 }
 
 // Resolve resolves a reference against the object
-func (r *objectResolver) Resolve(dst any, resource any, localRef string) error {
+func (r objectResolver) Resolve(dst any, resource any, localRef string) error {
 	// Local references must start with "#"
 	if !strings.HasPrefix(localRef, "#") {
 		return fmt.Errorf("local references must start with '#', got: %s", localRef)
@@ -240,7 +237,7 @@ func (r *httpResolver) Resolve(dst any, resource any, localRef string) error {
 	}
 
 	// Create an object resolver for the fetched data
-	objectResolver := NewObjectResolver()
+	objectResolver := objectResolver{}
 
 	// Resolve against the fetched data
 	return objectResolver.Resolve(dst, parsed, localRef)
@@ -265,7 +262,6 @@ func (r *httpResolver) fetchHTTP(uri string) ([]byte, error) {
 
 	return data, nil
 }
-
 
 // fsResolver resolves file-based references using os.Root
 type fsResolver struct {
@@ -362,7 +358,7 @@ func (r *fsResolver) Resolve(dst any, resource any, localRef string) error {
 	}
 
 	// Create an object resolver for the loaded data
-	objectResolver := NewObjectResolver()
+	objectResolver := objectResolver{}
 
 	// If no local reference provided, return the whole document
 	if localRef == "" {
@@ -374,13 +370,6 @@ func (r *fsResolver) Resolve(dst any, resource any, localRef string) error {
 	return objectResolver.Resolve(dst, parsed, localRef)
 }
 
-// parseReference separates URI and fragment parts
-func parseReference(ref string) (uri, fragment string) {
-	if idx := strings.Index(ref, "#"); idx >= 0 {
-		return ref[:idx], ref[idx+1:]
-	}
-	return ref, ""
-}
 
 // globalResolver is a singleton StackedResolver for the global Resolve function
 var globalResolver *StackedResolver
@@ -402,11 +391,11 @@ func Resolve(dst any, reference string) error {
 	if err != nil {
 		return fmt.Errorf("failed to split reference: %w", err)
 	}
-	
+
 	// If it's a pure local reference, use empty resource (will fallback to objectResolver)
 	if external == "" {
 		return fmt.Errorf("global resolver cannot handle pure local references")
 	}
-	
+
 	return globalResolver.Resolve(dst, external, local)
 }
