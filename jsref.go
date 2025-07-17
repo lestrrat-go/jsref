@@ -172,7 +172,7 @@ func (r *StackedResolver) Resolve(dst any, resource any, localRef string) error 
 	}
 	allErrors = append(allErrors, err)
 
-	return fmt.Errorf("jsref: StackedResolver.Resolve: no suitable resolver found for resource type %T. list of errors during resolution process: %w", resource, errors.Join(allErrors...))
+	return fmt.Errorf("jsref: StackedResolver.Resolve: failed to resolve reource type %T. list of errors during resolution process: %w", resource, errors.Join(allErrors...))
 }
 
 // objectResolver resolves pointers against a single static object
