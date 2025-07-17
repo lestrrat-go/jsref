@@ -19,7 +19,7 @@ import (
 type Resolver interface {
 	// CanResolve returns true if this resolver can handle the given resource type
 	CanResolve(resource any) bool
-	
+
 	// Resolve resolves a JSON reference against a resource.
 	// The standard behavior is to use the resource parameter as-is and expect
 	// localRef to be a local reference starting with "#" (e.g., "#/path/to/data").
@@ -30,7 +30,7 @@ type Resolver interface {
 // Split splits a JSON reference into its external and local components
 func Split(reference string) (external string, local string, err error) {
 	if reference == "" {
-		return "", "", fmt.Errorf("empty reference")
+		return "", "", fmt.Errorf("jsref.Split: empty reference")
 	}
 
 	// If it starts with #, it's a pure local reference
@@ -50,7 +50,7 @@ func Split(reference string) (external string, local string, err error) {
 // parseData parses JSON or YAML data using heuristics for efficient format detection
 func parseData(data []byte) (any, error) {
 	if len(data) == 0 {
-		return nil, fmt.Errorf("empty data")
+		return nil, fmt.Errorf("jsref.parseData: empty data")
 	}
 
 	var parsed any
@@ -63,7 +63,7 @@ func parseData(data []byte) (any, error) {
 		}
 		// If JSON failed, still try YAML as fallback
 		if err := yaml.Unmarshal(data, &parsed); err != nil {
-			return nil, fmt.Errorf("failed to parse as JSON or YAML: %w", err)
+			return nil, fmt.Errorf("jsref.parseData: failed to parse as JSON or YAML: %w", err)
 		}
 	} else {
 		// Try YAML first if it doesn't look like JSON
@@ -72,7 +72,7 @@ func parseData(data []byte) (any, error) {
 		}
 		// If YAML failed, try JSON as fallback
 		if err := json.Unmarshal(data, &parsed); err != nil {
-			return nil, fmt.Errorf("failed to parse as JSON or YAML: %w", err)
+			return nil, fmt.Errorf("jsref.parseData: failed to parse as JSON or YAML: %w", err)
 		}
 	}
 
@@ -143,10 +143,10 @@ func (r *StackedResolver) CanResolve(resource any) bool {
 // with a built-in object resolver as the final fallback.
 //
 // This method follows the standard Resolver interface behavior:
-// - Uses the resource parameter as-is without modification
-// - Expects localRef to be a local reference starting with "#" (e.g., "#/path/to/data")
-// - Individual resolvers may return errors if the resource type doesn't match their expectations
-//   (e.g., HTTP resolvers expect string URLs, file resolvers expect string paths)
+//   - Uses the resource parameter as-is without modification
+//   - Expects localRef to be a local reference starting with "#" (e.g., "#/path/to/data")
+//   - Individual resolvers may return errors if the resource type doesn't match their expectations
+//     (e.g., HTTP resolvers expect string URLs, file resolvers expect string paths)
 //
 // For convenience features like automatic full reference parsing
 // (e.g., "https://example.com/data.json#/path"), use the global jsref.Resolve() function instead.
@@ -172,7 +172,7 @@ func (r *StackedResolver) Resolve(dst any, resource any, localRef string) error 
 	}
 	allErrors = append(allErrors, err)
 
-	return fmt.Errorf("no suitable resolver found for resource type %T. list of errors during resolution process: %w", resource, errors.Join(allErrors...))
+	return fmt.Errorf("jsref: StackedResolver.Resolve: failed to resolve reource type %T. list of errors during resolution process: %w", resource, errors.Join(allErrors...))
 }
 
 // objectResolver resolves pointers against a single static object
@@ -201,14 +201,14 @@ func (r objectResolver) CanResolve(resource any) bool {
 func (r objectResolver) Resolve(dst any, resource any, localRef string) error {
 	// Local references must start with "#"
 	if !strings.HasPrefix(localRef, "#") {
-		return fmt.Errorf("local references must start with '#', got: %s", localRef)
+		return fmt.Errorf("jsref: objectResolver.Resolve: local references must start with '#', got: %s", localRef)
 	}
 
 	// Remove the "#" prefix to get the JSON pointer
 	pointer := localRef[1:]
 	ptr, err := jsptr.New(pointer)
 	if err != nil {
-		return fmt.Errorf("invalid JSON pointer %s: %w", pointer, err)
+		return fmt.Errorf("jsref: objectResolver.Resolve: invalid JSON pointer %s: %w", pointer, err)
 	}
 	return ptr.Retrieve(dst, resource)
 }
@@ -238,11 +238,11 @@ func (r *httpResolver) CanResolve(resource any) bool {
 func (r *httpResolver) Resolve(dst any, resource any, localRef string) error {
 	str, ok := resource.(string)
 	if !ok {
-		return fmt.Errorf("httpResolver requires string resource, got %T", resource)
+		return fmt.Errorf("jsref: httpResolver.Resolve: httpResolver requires string resource, got %T", resource)
 	}
 	u, err := url.Parse(str)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("httpResolver requires HTTP/HTTPS URL, got: %s", str)
+		return fmt.Errorf("jsref: httpResolver.Resolve: httpResolver requires HTTP/HTTPS URL, got: %s", str)
 	}
 
 	uri := str
@@ -250,7 +250,7 @@ func (r *httpResolver) Resolve(dst any, resource any, localRef string) error {
 	// Fetch the resource
 	data, err := r.fetchHTTP(uri)
 	if err != nil {
-		return fmt.Errorf("failed to fetch HTTP resource %s: %w", uri, err)
+		return fmt.Errorf("jsref: httpResolver.Resolve: failed to fetch HTTP resource %s: %w", uri, err)
 	}
 
 	// Parse the data
@@ -270,17 +270,17 @@ func (r *httpResolver) Resolve(dst any, resource any, localRef string) error {
 func (r *httpResolver) fetchHTTP(uri string) ([]byte, error) {
 	resp, err := http.Get(uri)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch %s: %w", uri, err)
+		return nil, fmt.Errorf("jsref: httpResolver.fetchHTTP: failed to fetch %s: %w", uri, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("jsref: httpResolver.fetchHTTP: HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, fmt.Errorf("jsref: httpResolver.fetchHTTP: failed to read response body: %w", err)
 	}
 
 	return data, nil
@@ -305,7 +305,7 @@ func NewFSResolver(dir string) (Resolver, error) {
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open root directory %s: %w", dir, err)
+		return nil, fmt.Errorf("jsref.NewFSResolver: failed to open root directory %s: %w", dir, err)
 	}
 	return &fsResolver{root: root, rootDir: dir}, nil
 }
@@ -324,11 +324,11 @@ func (r *fsResolver) CanResolve(resource any) bool {
 func (r *fsResolver) Resolve(dst any, resource any, localRef string) error {
 	str, ok := resource.(string)
 	if !ok {
-		return fmt.Errorf("fsResolver requires string resource, got %T", resource)
+		return fmt.Errorf("jsref: fsResolver.Resolve: fsResolver requires string resource, got %T", resource)
 	}
 	// Should not handle pure local references (starting with #)
 	if strings.HasPrefix(str, "#") {
-		return fmt.Errorf("fsResolver cannot handle local reference: %s", str)
+		return fmt.Errorf("jsref: fsResolver.Resolve: fsResolver cannot handle local reference: %s", str)
 	}
 
 	filePath := str
@@ -347,14 +347,14 @@ func (r *fsResolver) Resolve(dst any, resource any, localRef string) error {
 			var err error
 			rootDir, err = filepath.Abs(rootDir)
 			if err != nil {
-				return fmt.Errorf("failed to resolve root directory: %w", err)
+				return fmt.Errorf("jsref: fsResolver.Resolve: failed to resolve root directory: %w", err)
 			}
 		}
 
 		// Check if the absolute path is within our root
 		relPath, err := filepath.Rel(rootDir, filePath)
 		if err != nil || strings.HasPrefix(relPath, "..") {
-			return fmt.Errorf("fs resolver cannot handle path outside its root: %s (root: %s)", filePath, rootDir)
+			return fmt.Errorf("jsref: fsResolver.Resolve: fs resolver cannot handle path outside its root: %s (root: %s)", filePath, rootDir)
 		}
 		filePath = relPath
 	}
@@ -364,25 +364,25 @@ func (r *fsResolver) Resolve(dst any, resource any, localRef string) error {
 
 	// Check if root was successfully opened
 	if r.root == nil {
-		return fmt.Errorf("fs resolver root directory is not accessible: %s", r.rootDir)
+		return fmt.Errorf("jsref: fsResolver.Resolve: fs resolver root directory is not accessible: %s", r.rootDir)
 	}
 
 	// Read the file using os.Root
 	file, err := r.root.Open(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to open file %s: %w", filePath, err)
+		return fmt.Errorf("jsref: fsResolver.Resolve: failed to open file %s: %w", filePath, err)
 	}
 	defer func() { _ = file.Close() }()
 
 	data, err := io.ReadAll(file)
 	if err != nil {
-		return fmt.Errorf("failed to read file %s: %w", filePath, err)
+		return fmt.Errorf("jsref: fsResolver.Resolve: failed to read file %s: %w", filePath, err)
 	}
 
 	// Parse the data (try JSON first, then YAML)
 	parsed, err := parseData(data)
 	if err != nil {
-		return fmt.Errorf("failed to parse file %s: %w", filePath, err)
+		return fmt.Errorf("jsref: fsResolver.Resolve: failed to parse file %s: %w", filePath, err)
 	}
 
 	// Create an object resolver for the loaded data
@@ -398,7 +398,6 @@ func (r *fsResolver) Resolve(dst any, resource any, localRef string) error {
 	return objectResolver.Resolve(dst, parsed, localRef)
 }
 
-
 // globalResolver is a singleton StackedResolver for the global Resolve function
 var globalResolver *StackedResolver
 
@@ -413,17 +412,18 @@ func init() {
 }
 
 // Resolve is a global convenience function that uses a stock StackedResolver.
-// 
+//
 // This function has the same signature as other Resolvers but with enhanced behavior:
-// - If localRef contains a full reference (e.g., "https://example.com/data.json#/path"),
-//   it uses Split() to parse it and passes the correct values to the underlying StackedResolver,
-//   ignoring the resource parameter entirely to avoid type mismatches with specific Resolvers
-// - If localRef is a pure local reference (e.g., "#/path"), it uses the resource parameter normally
+//   - If localRef contains a full reference (e.g., "https://example.com/data.json#/path"),
+//     it uses Split() to parse it and passes the correct values to the underlying StackedResolver,
+//     ignoring the resource parameter entirely to avoid type mismatches with specific Resolvers
+//   - If localRef is a pure local reference (e.g., "#/path"), it uses the resource parameter normally
 //
 // Examples:
-//   jsref.Resolve(&dst, data, "#/path")                              // uses data as resource
-//   jsref.Resolve(&dst, data, "/file.json#/path")                    // ignores data, uses "/file.json"
-//   jsref.Resolve(&dst, nil, "https://example.com/data.json#/path")  // uses external URL
+//
+//	jsref.Resolve(&dst, data, "#/path")                              // uses data as resource
+//	jsref.Resolve(&dst, data, "/file.json#/path")                    // ignores data, uses "/file.json"
+//	jsref.Resolve(&dst, nil, "https://example.com/data.json#/path")  // uses external URL
 //
 // This differs from StackedResolver.Resolve() which always uses the resource parameter as-is
 // and may return errors if the resource type doesn't match what a specific Resolver expects.
@@ -431,17 +431,17 @@ func Resolve(dst any, resource any, localRef string) error {
 	// Try to split the localRef to see if it contains a full reference
 	external, local, err := Split(localRef)
 	if err != nil {
-		return fmt.Errorf("failed to split reference: %w", err)
+		return fmt.Errorf("jsref.Resolve: failed to split reference: %w", err)
 	}
-	
+
 	// If there's an external part, ignore the resource parameter and use the external part
 	if external != "" {
 		return globalResolver.Resolve(dst, external, local)
 	}
-	
+
 	// No external part, use normal resolver behavior with provided resource
 	if resource == nil {
-		return fmt.Errorf("cannot resolve pure local reference without a resource")
+		return fmt.Errorf("jsref.Resolve: cannot resolve pure local reference without a resource")
 	}
 	return globalResolver.Resolve(dst, resource, localRef)
 }
