@@ -143,3 +143,67 @@ Unfortunately there is no way to really control this for the first call to jsref
 ctx = jsref.WithBaseURI(context.Background(), "https://example.com.invalid/foo.json")
 jsref.Resolve(ctx, dst, resource, ref)
 ```
+
+# Working with objects
+
+jsref should work with any Go struct, map, slice/array, or scalar. At least, it should try to do make it work.
+
+## Map
+
+Basic maps are easy. You just use the key names. `/foo/bar` on the following map should point to the value "here".
+
+```
+map[string]any{
+  "foo": map[string]any{
+    "bar": "here"
+  }
+}
+```
+
+However, we should allow maps with value types other than `any` as well (obviously, some references won't work, but it should do its best, and return an error otherwise). keys must be `string`, and it should return an error otherwise.
+
+## Slices/Arrays
+
+arrays/slices work much the same way. []any, []int, []map[string]any, etc. Give a reference like "/0", "/1", the resolver should do its best to follow the reference into indices 0 and 1 respectively. When it's just not possible, then return an error.
+
+## Objects
+
+we should also work with objects. First special case is when objects implement the following interface:
+
+```
+type SelfResolver interface {
+  Resolve(string) (any, error)
+}
+```
+
+Objects that implement this interface receive a reference fragment like `foo` and, it should return a corresponding value. For example, the previous map example may look like:
+
+```
+type MyObject struct {
+  foo MyObject
+  bar string
+}
+
+func (o *MyObject) Resolve(ref string) (any, error) {
+  switch ref {
+  case `foo`:
+    return o.foo, nil
+  case `bar`:
+    return o.bar, nil
+  default:
+    return nil, fmt.Errorf(`can't resolve this`)
+  }
+}
+
+MyObject{
+  foo: MyObject{
+    bar: "hello",
+  },
+}
+```
+
+If the interface is not implemented, we should use reflection to match the reference as best as possible. Only exported fields should be considered, as unexported fields will not be reachable from our resolvers. First it should try json tags. if it doesn't work, it should try the field name verbatim (of course, it would be capitalized, but that's the user's perogative)
+
+## Circular references
+
+Not sure about this one yet. We should create tests first, and then think about how to tackle it.

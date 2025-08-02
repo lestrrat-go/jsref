@@ -21,6 +21,16 @@ type Resolver interface {
 	Resolve(dst any, resource any, localRef string) error
 }
 
+// SelfResolver interface allows objects to define their own resolution logic.
+// Objects implementing this interface can handle reference resolution internally
+// rather than relying on reflection-based field access.
+type SelfResolver interface {
+	// Resolve receives a reference fragment (like "foo") and returns the corresponding value.
+	// This allows objects to customize how their fields/properties are accessed during
+	// JSON reference resolution.
+	Resolve(string) (any, error)
+}
+
 // Split splits a JSON reference into its external and local components
 func Split(reference string) (external string, local string, err error) {
 	if reference == "" {
