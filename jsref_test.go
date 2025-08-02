@@ -2,8 +2,10 @@ package jsref_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lestrrat-go/jsref/v2"
@@ -448,4 +450,189 @@ json:
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "httpResolver requires HTTP/HTTPS URL")
 	})
+}
+
+// CyclicSelfResolver creates cycles through the SelfResolver interface
+type CyclicSelfResolver struct {
+	value string
+	other *CyclicSelfResolver
+}
+
+func (c *CyclicSelfResolver) Resolve(ref string) (any, error) {
+	switch ref {
+	case "value":
+		return c.value, nil
+	case "other":
+		return c.other, nil
+	case "self":
+		return c, nil // Direct self-reference
+	default:
+		return nil, fmt.Errorf("unknown field: %s", ref)
+	}
+}
+
+// TestCircularReferences tests that circular references work correctly
+// Our implementation successfully handles circular references by allowing traversal
+// through them without infinite recursion
+func TestCircularReferences(t *testing.T) {
+	resolver := jsref.NewObjectResolver()
+
+	t.Run("map self-reference", func(t *testing.T) {
+		// Create a map that references itself
+		data := make(map[string]any)
+		data["self"] = data
+		data["value"] = "test"
+
+		// Should be able to resolve non-circular path
+		var value string
+		err := resolver.Resolve(&value, data, "#/value")
+		require.NoError(t, err)
+		require.Equal(t, "test", value)
+
+		// Should be able to traverse circular path successfully
+		var result any
+		err = resolver.Resolve(&result, data, "#/self/self/self")
+		require.NoError(t, err)
+		// result contains the circular structure (same as data)
+		// We verify this by checking that we can resolve from the result
+		var valueFromResult string
+		err = resolver.Resolve(&valueFromResult, result, "#/value")
+		require.NoError(t, err)
+		require.Equal(t, "test", valueFromResult)
+	})
+
+	t.Run("struct pointer cycle", func(t *testing.T) {
+		type Node struct {
+			Value string `json:"value"`
+			Next  *Node  `json:"next"`
+		}
+
+		// Create circular linked list: a -> b -> a
+		a := &Node{Value: "a"}
+		b := &Node{Value: "b", Next: a}
+		a.Next = b
+
+		// Should be able to resolve direct values
+		var value string
+		err := resolver.Resolve(&value, a, "#/value")
+		require.NoError(t, err)
+		require.Equal(t, "a", value)
+
+		// Should be able to resolve one level
+		err = resolver.Resolve(&value, a, "#/next/value")
+		require.NoError(t, err)
+		require.Equal(t, "b", value)
+
+		// Should be able to traverse circular path successfully
+		err = resolver.Resolve(&value, a, "#/next/next/value")
+		require.NoError(t, err)
+		require.Equal(t, "a", value) // Back to original
+
+		// Even deeper circular traversal works
+		err = resolver.Resolve(&value, a, "#/next/next/next/value")
+		require.NoError(t, err)
+		require.Equal(t, "b", value) // Back to b
+	})
+
+	t.Run("complex nested cycle", func(t *testing.T) {
+		// Create a complex structure with cycles
+		outer := make(map[string]any)
+		inner := make(map[string]any)
+		
+		outer["inner"] = inner
+		outer["data"] = "outer_value"
+		inner["parent"] = outer
+		inner["data"] = "inner_value"
+
+		// Should resolve normal paths
+		var value string
+		err := resolver.Resolve(&value, outer, "#/data")
+		require.NoError(t, err)
+		require.Equal(t, "outer_value", value)
+
+		err = resolver.Resolve(&value, outer, "#/inner/data")
+		require.NoError(t, err)
+		require.Equal(t, "inner_value", value)
+
+		// Should be able to traverse circular path successfully
+		err = resolver.Resolve(&value, outer, "#/inner/parent/data")
+		require.NoError(t, err)
+		require.Equal(t, "outer_value", value) // Back to outer
+
+		// More complex circular traversal
+		err = resolver.Resolve(&value, outer, "#/inner/parent/inner/data")
+		require.NoError(t, err)
+		require.Equal(t, "inner_value", value) // Back to inner
+	})
+}
+
+func TestSelfResolverCircularReferences(t *testing.T) {
+	resolver := jsref.NewObjectResolver()
+
+	t.Run("self-resolver direct cycle", func(t *testing.T) {
+		obj := &CyclicSelfResolver{value: "test"}
+
+		// Normal resolution should work
+		var value string
+		err := resolver.Resolve(&value, obj, "#/value")
+		require.NoError(t, err)
+		require.Equal(t, "test", value)
+
+		// Direct self-reference cycle should work
+		err = resolver.Resolve(&value, obj, "#/self/value")
+		require.NoError(t, err)
+		require.Equal(t, "test", value) // Same as original
+
+		// Multiple levels should work
+		err = resolver.Resolve(&value, obj, "#/self/self/value")
+		require.NoError(t, err)
+		require.Equal(t, "test", value)
+	})
+
+	t.Run("self-resolver indirect cycle", func(t *testing.T) {
+		obj1 := &CyclicSelfResolver{value: "obj1"}
+		obj2 := &CyclicSelfResolver{value: "obj2", other: obj1}
+		obj1.other = obj2
+
+		// Normal resolution should work
+		var value string
+		err := resolver.Resolve(&value, obj1, "#/value")
+		require.NoError(t, err)
+		require.Equal(t, "obj1", value)
+
+		err = resolver.Resolve(&value, obj1, "#/other/value")
+		require.NoError(t, err)
+		require.Equal(t, "obj2", value)
+
+		// Circular path should work successfully
+		err = resolver.Resolve(&value, obj1, "#/other/other/value")
+		require.NoError(t, err)
+		require.Equal(t, "obj1", value) // Back to obj1
+
+		// Even deeper circular traversal
+		err = resolver.Resolve(&value, obj1, "#/other/other/other/value")
+		require.NoError(t, err)
+		require.Equal(t, "obj2", value) // Back to obj2
+	})
+}
+
+// TestLegitimateDeepStructure tests that genuinely deep (non-circular) structures work
+func TestLegitimateDeepStructure(t *testing.T) {
+	resolver := jsref.NewObjectResolver()
+
+	// Create a legitimately deep structure (not circular)
+	current := map[string]any{"value": "deep"}
+	for i := 0; i < 50; i++ { // Reasonable depth for testing
+		next := map[string]any{"nested": current}
+		current = next
+	}
+
+	// Deep but legitimate path should work fine
+	var result string
+	path := "#/" + strings.Repeat("nested/", 50) + "value"
+	err := resolver.Resolve(&result, current, path)
+	
+	// Should succeed since it's not circular, just deep
+	require.NoError(t, err)
+	require.Equal(t, "deep", result)
 }
