@@ -36,7 +36,7 @@ func (r objectResolver) Resolve(dst any, resource any, localRef string) error {
 
 	// Remove the "#" prefix to get the JSON pointer
 	pointer := localRef[1:]
-	
+
 	// Split the pointer into path segments
 	segments := strings.Split(pointer, "/")
 	if len(segments) == 1 && segments[0] == "" {
